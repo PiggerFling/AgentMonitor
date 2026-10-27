@@ -3,16 +3,13 @@ import test from 'node:test';
 import type { AgentRun, RemoteHostStatus } from '../src/shared/types';
 import {
   assessMonitorHealth,
-  buildHostOptions,
-  filterAgentsByHost,
-  filterRunsByHost,
-  HOST_ALL,
-  HOST_LOCAL,
-  remoteHostFilter,
+  groupRunsBySource,
+  LOCAL_GROUP_ID,
+  readCollapsedGroups,
   remoteIndicatorState,
   remoteStatusTitle,
-  resolveHostFilter,
-  runHostLabel,
+  saveCollapsedGroups,
+  toggleGroup,
 } from '../src/renderer/remoteUi';
 
 const remote = (id: string, label: string, state: RemoteHostStatus['state'] = 'connected', error?: string): RemoteHostStatus => ({ id, label, state, ...(error ? { error } : {}) });
@@ -20,41 +17,40 @@ const run = (id: string, host?: string): AgentRun => ({ id, harness: 'codex', ..
 
 const runs = [run('local-1'), run('remote:a::r1', 'alpha'), run('remote:b::r2', 'beta'), run('local-2')];
 
-test('host options are empty without remotes and list all, local, then each remote label', () => {
-  assert.deepEqual(buildHostOptions(undefined), []);
-  assert.deepEqual(buildHostOptions([]), []);
-  assert.deepEqual(buildHostOptions([remote('a', 'alpha'), remote('b', 'beta')]).map((option) => option.label), ['All hosts', 'Local', 'alpha', 'beta']);
+test('without remotes all runs form the local group', () => {
+  const groups = groupRunsBySource([run('1'), run('2')]);
+  assert.deepEqual(groups.map((group) => [group.id, group.kind, group.runs.map((item) => item.id)]), [[LOCAL_GROUP_ID, 'local', ['1', '2']]]);
+  assert.deepEqual(groupRunsBySource([]).map((group) => group.runs.length), [0]);
 });
 
-test('remote labels cannot collide with the built-in host options', () => {
-  const options = buildHostOptions([remote('x', 'all'), remote('y', 'local')]);
-  assert.equal(new Set(options.map((option) => option.value)).size, 4);
-  assert.deepEqual(filterRunsByHost([run('1'), run('2', 'local')], remoteHostFilter('local')).map((item) => item.id), ['2']);
-  assert.deepEqual(filterRunsByHost([run('1'), run('2', 'local')], HOST_LOCAL).map((item) => item.id), ['1']);
+test('runs are grouped local first, then one group per remote in config order, keeping run order', () => {
+  const groups = groupRunsBySource(runs, [remote('b', 'beta'), remote('a', 'alpha', 'error', 'down')]);
+  assert.deepEqual(groups.map((group) => group.id), ['local', 'remote:b', 'remote:a']);
+  assert.deepEqual(groups.map((group) => group.runs.map((item) => item.id)), [['local-1', 'local-2'], ['remote:b::r2'], ['remote:a::r1']]);
+  assert.equal(groups[2].remote?.error, 'down');
+  assert.equal(groups[1].label, 'beta');
 });
 
-test('a filter for a host that is no longer configured falls back to all hosts', () => {
-  const remotes = [remote('a', 'alpha')];
-  assert.equal(resolveHostFilter(remoteHostFilter('alpha'), remotes), remoteHostFilter('alpha'));
-  assert.equal(resolveHostFilter(remoteHostFilter('beta'), remotes), HOST_ALL);
-  assert.equal(resolveHostFilter(HOST_LOCAL, remotes), HOST_LOCAL);
-  assert.equal(resolveHostFilter(HOST_LOCAL, []), HOST_ALL);
+test('a remote without runs still gets a group, and runs of an unknown host get their own', () => {
+  const groups = groupRunsBySource([run('x', 'gamma'), run('y', 'gamma')], [remote('a', 'alpha', 'connecting')]);
+  assert.deepEqual(groups.map((group) => [group.id, group.runs.length, Boolean(group.remote)]), [['local', 0, false], ['remote:a', 0, true], ['host:gamma', 2, false]]);
 });
 
-test('runs and their agents are filtered by host', () => {
-  assert.equal(filterRunsByHost(runs, HOST_ALL).length, 4);
-  assert.deepEqual(filterRunsByHost(runs, HOST_LOCAL).map((item) => item.id), ['local-1', 'local-2']);
-  assert.deepEqual(filterRunsByHost(runs, remoteHostFilter('beta')).map((item) => item.id), ['remote:b::r2']);
-  const agents = [{ id: 'a1', runId: 'local-1' }, { id: 'a2', runId: 'remote:a::r1' }, { id: 'a3', runId: 'unknown-run' }];
-  assert.deepEqual(filterAgentsByHost(agents, runs, HOST_ALL).map((agent) => agent.id), ['a1', 'a2', 'a3']);
-  assert.deepEqual(filterAgentsByHost(agents, runs, HOST_LOCAL).map((agent) => agent.id), ['a1']);
-  assert.deepEqual(filterAgentsByHost(agents, runs, remoteHostFilter('alpha')).map((agent) => agent.id), ['a2']);
+test('a remote labelled "local" does not merge with the local group', () => {
+  const groups = groupRunsBySource([run('1'), run('2', 'local')], [remote('l', 'local')]);
+  assert.deepEqual(groups.map((group) => [group.id, group.runs.map((item) => item.id)]), [['local', ['1']], ['remote:l', ['2']]]);
 });
 
-test('host labels only appear once remotes are configured', () => {
-  assert.equal(runHostLabel(run('1'), false), undefined);
-  assert.equal(runHostLabel(run('1'), true), 'local');
-  assert.equal(runHostLabel(run('2', 'alpha'), true), 'alpha');
+test('collapsed groups toggle and survive a round trip through storage', () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } };
+  assert.deepEqual([...readCollapsedGroups(storage)], []);
+  const collapsed = toggleGroup(toggleGroup(new Set(), 'remote:a'), 'local');
+  saveCollapsedGroups(collapsed, storage);
+  assert.deepEqual([...readCollapsedGroups(storage)].sort(), ['local', 'remote:a']);
+  assert.deepEqual([...toggleGroup(collapsed, 'local')], ['remote:a']);
+  store.set([...store.keys()][0], '{not json');
+  assert.deepEqual([...readCollapsedGroups(storage)], []);
 });
 
 test('without remotes every error is a local error, as before', () => {

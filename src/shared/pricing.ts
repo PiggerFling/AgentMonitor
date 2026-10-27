@@ -18,6 +18,10 @@ for (const [model,input,output] of [
 ] as const) rates[model]={vendor:'anthropic',input,read:input*.1,write:input*1.25,write1h:input*2,output};
 for (const [model,read] of [['grok-4.6',.5],['grok-4.5',.3]] as const) rates[model]={vendor:'xai',input:2,read,output:6,threshold:200000,thresholdInclusive:true,long:{input:4,read:read*2,write:0,output:12}};
 
+/** Verified list rates in USD per 1M tokens, for display. `long` applies above `threshold` request input tokens. */
+export type ModelPrice = Readonly<Rate> & { model: string };
+export function listModelPrices(): ModelPrice[] { return Object.entries(rates).map(([model,rate])=>({...rate,model})); }
+
 
 export interface CostEstimate { usd:number|null; knownUsd:number; complete:boolean; unpricedTokens:number; notes:string[] }
 function priceUsage(usage:ModelTokenUsage): {usd:number|null;note?:string} {

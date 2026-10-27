@@ -2,21 +2,24 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
+  ChevronRight,
   CircleDot,
-  Filter,
+  Inbox,
+  Laptop,
   LoaderCircle,
   Maximize2,
   Network,
   PanelRightClose,
   PauseCircle,
-  Play,
+  Plus,
   Radio,
   RefreshCw,
   Search,
+  Settings as SettingsIcon,
   SquareArrowOutUpRight,
   Target,
   TriangleAlert,
+  Unplug,
   Zap,
   X,
 } from 'lucide-react';
@@ -57,19 +60,17 @@ import type {
   TraceEntry,
 } from '../shared/types';
 import { useDashboardStore } from './store';
-import { ThemeSelector } from './ThemeSelector';
 import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
 import { formatNumber, formatRelativeTime, t, useI18n, type MessageKey } from './i18n';
-import { LanguageSelector } from './LanguageSelector';
-import { ServersControl } from './ServersPanel';
-import { assessMonitorHealth, buildHostOptions, filterAgentsByHost, filterRunsByHost, remoteIndicatorState, remoteStatusTitle, resolveHostFilter, runHostLabel } from './remoteUi';
+import { SettingsPage, settingsShortcut, type MonitorMode } from './SettingsPage';
+import { assessMonitorHealth, groupRunsBySource, readCollapsedGroups, remoteIndicatorState, remoteStatusTitle, saveCollapsedGroups, toggleGroup, type RemoteIndicatorState } from './remoteUi';
 import './TraceTabs.css';
 
-type SourceMode = 'loading' | 'live' | 'offline' | 'demo';
-import type { ProviderFilter } from './store';
+type SourceMode = MonitorMode;
+import type { ProviderFilter, SettingsSection } from './store';
 
 type LazyAgentRun = AgentRun & { agentCount?: number };
 type LazyMonitorSnapshot = MonitorSnapshot & { selectedRunId?: string };
@@ -96,108 +97,6 @@ const EMPTY_SNAPSHOT: MonitorSnapshot = {
   edges: [],
   watching: false,
   errors: [],
-};
-
-const DEMO_SNAPSHOT: MonitorSnapshot = {
-  watching: true,
-  errors: [],
-  runs: [
-    {
-      id: 'demo-run-agent-monitor',
-      harness: 'codex',
-      rootAgentId: 'demo-root',
-      cwd: '/workspace/agent-monitor',
-      startedAt: Date.now() - 1000 * 60 * 8,
-      lastActivityAt: Date.now() - 1000 * 4,
-    },
-  ],
-  agents: [
-    {
-      id: 'demo-root',
-      runId: 'demo-run-agent-monitor',
-      parentId: null,
-      harness: 'codex',
-      type: 'main',
-      status: 'active',
-      sessionId: 'demo-session',
-      threadId: 'demo-thread',
-      model: 'GPT-6 Astra',
-      provider: 'OpenAI',
-      reasoningEffort: 'high',
-      role: 'main agent',
-      nickname: 'Astra',
-      cwd: '/workspace/agent-monitor',
-      createdAt: Date.now() - 1000 * 60 * 8,
-      lastActivityAt: Date.now() - 1000 * 3,
-      activity: 'Coordinating the Agent Monitor implementation',
-      stats: { inputTokens: 124800, outputTokens: 18600, toolCalls: 32, errors: 0 },
-    },
-    {
-      id: 'demo-explorer',
-      runId: 'demo-run-agent-monitor',
-      parentId: 'demo-root',
-      harness: 'codex',
-      type: 'subagent',
-      status: 'active',
-      sessionId: 'demo-session-explorer',
-      threadId: 'demo-thread-explorer',
-      parentThreadId: 'demo-thread',
-      model: 'GPT-5.6 Luna',
-      provider: 'OpenAI',
-      reasoningEffort: 'medium',
-      role: 'explorer',
-      nickname: 'Repository Scout',
-      createdAt: Date.now() - 1000 * 60 * 5,
-      lastActivityAt: Date.now() - 1000 * 7,
-      activity: 'Mapping renderer boundaries and existing contracts',
-      stats: { inputTokens: 18421, outputTokens: 2194, toolCalls: 12, errors: 0 },
-    },
-    {
-      id: 'demo-tester',
-      runId: 'demo-run-agent-monitor',
-      parentId: 'demo-root',
-      harness: 'codex',
-      type: 'subagent',
-      status: 'idle',
-      sessionId: 'demo-session-tester',
-      threadId: 'demo-thread-tester',
-      parentThreadId: 'demo-thread',
-      model: 'GPT-5.6 Luna',
-      provider: 'OpenAI',
-      reasoningEffort: 'high',
-      role: 'test runner',
-      nickname: 'Validation',
-      createdAt: Date.now() - 1000 * 60 * 4,
-      lastActivityAt: Date.now() - 1000 * 48,
-      activity: 'Waiting for the Vite shell to finish compiling',
-      stats: { inputTokens: 12640, outputTokens: 3410, toolCalls: 8, errors: 0 },
-    },
-    {
-      id: 'demo-reviewer',
-      runId: 'demo-run-agent-monitor',
-      parentId: 'demo-explorer',
-      harness: 'codex',
-      type: 'subagent',
-      status: 'finished',
-      sessionId: 'demo-session-reviewer',
-      threadId: 'demo-thread-reviewer',
-      parentThreadId: 'demo-thread-explorer',
-      model: 'GPT-5.6 Luna',
-      provider: 'OpenAI',
-      reasoningEffort: 'low',
-      role: 'reviewer',
-      nickname: 'Trace Review',
-      createdAt: Date.now() - 1000 * 60 * 3,
-      lastActivityAt: Date.now() - 1000 * 74,
-      activity: 'Finished checking the normalized trace contract',
-      stats: { inputTokens: 8300, outputTokens: 1960, toolCalls: 6, errors: 0 },
-    },
-  ],
-  edges: [
-    { id: 'demo-edge-root-explorer', source: 'demo-root', target: 'demo-explorer', type: 'spawn', status: 'active' },
-    { id: 'demo-edge-root-tester', source: 'demo-root', target: 'demo-tester', type: 'spawn', status: 'finished' },
-    { id: 'demo-edge-explorer-reviewer', source: 'demo-explorer', target: 'demo-reviewer', type: 'spawn', status: 'finished' },
-  ],
 };
 
 const PROVIDERS: Array<{ value: ProviderFilter; label?: string; labelKey?: MessageKey }> = [
@@ -266,21 +165,9 @@ function providerLabel(value: AgentHarness) {
   return provider?.labelKey ? t(provider.labelKey) : provider?.label ?? t('app.providers.unknown');
 }
 
-function sampleTrace(agent: Agent): TraceEntry[] {
-  const base = agent.createdAt ?? now() - 1000 * 60;
-  return [
-    { id: `${agent.id}-trace-1`, timestamp: base, kind: 'event', text: `${agent.role ?? 'Agent'} session discovered by the monitor.` },
-    { id: `${agent.id}-trace-2`, timestamp: base + 1200, kind: 'assistant', text: agent.activity ?? 'Working through the current task.' },
-    { id: `${agent.id}-trace-3`, timestamp: base + 3600, kind: 'tool-call', text: 'search — rg --files src tests' },
-    { id: `${agent.id}-trace-4`, timestamp: base + 4900, kind: 'tool-result', text: 'Found renderer entry points and shared agent types.' },
-    { id: `${agent.id}-trace-5`, timestamp: base + 9800, kind: 'usage', text: `${formatExactNumber(agent.stats.inputTokens)} input · ${formatExactNumber(agent.stats.outputTokens)} output tokens` },
-  ];
-}
-
 function useMonitorSnapshot() {
-  const [nativeSnapshot, setNativeSnapshot] = useState<MonitorSnapshot>(EMPTY_SNAPSHOT);
+  const [snapshot, setNativeSnapshot] = useState<MonitorSnapshot>(EMPTY_SNAPSHOT);
   const [mode, setMode] = useState<SourceMode>(() => (typeof window !== 'undefined' && window.agentMonitor ? 'loading' : 'offline'));
-  const [usingDemo, setUsingDemo] = useState(false);
   const [loadedRunId, setLoadedRunId] = useState<string>();
   const [loadingRunId, setLoadingRunId] = useState<string>();
   const [runLoadError, setRunLoadError] = useState<string>();
@@ -330,14 +217,7 @@ function useMonitorSnapshot() {
     };
   }, []);
 
-  const snapshot = usingDemo ? DEMO_SNAPSHOT : nativeSnapshot;
   const loadRun = useCallback(async (runId: string) => {
-    if (usingDemo) {
-      setLoadedRunId(runId);
-      setLoadingRunId(undefined);
-      setRunLoadError(undefined);
-      return;
-    }
     const bridge = typeof window !== 'undefined' ? window.agentMonitor as LazyMonitorBridge | undefined : undefined;
     const requestId = ++loadRequestRef.current;
     setLoadingRunId(runId);
@@ -362,35 +242,9 @@ function useMonitorSnapshot() {
         setRunLoadError(error instanceof Error ? error.message : t('app.empty.runLoadFailed'));
       }
     }
-  }, [usingDemo]);
-
-  const setDemoMode = useCallback(() => {
-    ++loadRequestRef.current;
-    setRunLoadError(undefined);
-    setLoadingRunId(undefined);
-    setLoadedRunId(DEMO_SNAPSHOT.runs[0]?.id);
-    setUsingDemo(true);
   }, []);
 
-  const setLiveMode = useCallback(() => {
-    ++loadRequestRef.current;
-    setRunLoadError(undefined);
-    setLoadingRunId(undefined);
-    setLoadedRunId(snapshotSelectedRunId(nativeSnapshot));
-    setUsingDemo(false);
-  }, [nativeSnapshot]);
-
-  return {
-    snapshot,
-    mode: usingDemo ? 'demo' : mode,
-    loadedRunId: usingDemo ? DEMO_SNAPSHOT.runs[0]?.id : loadedRunId,
-    loadingRunId,
-    runLoadError,
-    loadRun,
-    setDemo: setDemoMode,
-    setLive: setLiveMode,
-    usingDemo,
-  };
+  return { snapshot, mode, loadedRunId, loadingRunId, runLoadError, loadRun };
 }
 
 type AgentNodeData = {
@@ -760,35 +614,45 @@ function AgentGraph({ runId, agents, edges, selectedAgentId, onSelectAgent, onOp
   );
 }
 
-function EmptyGraph({ mode, selectedRun, loading, loadError, onDemo, onRetry }: { mode: SourceMode; selectedRun?: AgentRun; loading: boolean; loadError?: string; onDemo: () => void; onRetry?: () => void }) {
+type EmptyKind = 'loading-run' | 'error' | 'offline' | 'connecting' | 'no-sessions' | 'filtered' | 'no-run' | 'waiting';
+
+function EmptyGraph({ mode, selectedRun, hasRuns, hasAnyRuns, providerName, loading, loadError, onRetry, onOpenSettings }: {
+  mode: SourceMode; selectedRun?: AgentRun; hasRuns: boolean; hasAnyRuns: boolean; providerName: string; loading: boolean; loadError?: string;
+  onRetry?: () => void; onOpenSettings: (section: SettingsSection) => void;
+}) {
   const { t } = useI18n();
-  const bridgeUnavailable = mode === 'offline';
-  const noRunSelected = !bridgeUnavailable && !selectedRun && !loading && !loadError;
-  const title = loading
-    ? t('app.empty.loadingTitle')
-    : loadError
-      ? t('app.empty.errorTitle')
-      : noRunSelected
-        ? t('app.empty.noRunTitle')
-        : bridgeUnavailable
-          ? t('app.empty.offlineTitle')
-          : t('app.empty.waitingTitle');
-  const description = loading
-    ? t('app.empty.loadingBody')
-    : loadError
-      ? loadError
-      : noRunSelected
-        ? t('app.empty.noRunBody')
-        : bridgeUnavailable
-          ? t('app.empty.offlineBody')
-          : t('app.empty.waitingBody');
+  const kind: EmptyKind = loading ? 'loading-run'
+    : loadError ? 'error'
+      : mode === 'offline' ? 'offline'
+        : mode === 'loading' ? 'connecting'
+          : !hasAnyRuns ? 'no-sessions'
+            : !hasRuns ? 'filtered'
+              : !selectedRun ? 'no-run' : 'waiting';
+  const copy: Record<EmptyKind, [string, string]> = {
+    'loading-run': [t('app.empty.loadingTitle'), t('app.empty.loadingBody')],
+    error: [t('app.empty.errorTitle'), loadError ?? ''],
+    offline: [t('app.empty.offlineTitle'), t('app.empty.offlineBody')],
+    connecting: [t('app.empty.connectingTitle'), t('app.empty.connectingBody')],
+    'no-sessions': [t('app.empty.noSessionsTitle'), t('app.empty.noSessionsBody')],
+    filtered: [t('app.empty.noSessionsTitle'), t('app.empty.noSessionsFiltered', { provider: providerName })],
+    'no-run': [t('app.empty.noRunTitle'), t('app.empty.noRunBody')],
+    waiting: [t('app.empty.waitingTitle'), t('app.empty.waitingBody')],
+  };
+  const [title, description] = copy[kind];
+  const glyph = kind === 'loading-run' || kind === 'connecting' ? <LoaderCircle size={30} strokeWidth={1.4} className="spin" />
+    : kind === 'error' ? <TriangleAlert size={30} strokeWidth={1.4} />
+      : kind === 'offline' ? <Unplug size={30} strokeWidth={1.4} />
+        : kind === 'no-sessions' || kind === 'filtered' ? <Inbox size={30} strokeWidth={1.4} /> : null;
   return (
-    <div className="empty-state">
-      {(loading || loadError) && <div className="empty-state__glyph">{loading ? <LoaderCircle size={34} strokeWidth={1.4} className="spin" /> : <TriangleAlert size={34} strokeWidth={1.4} />}</div>}
+    <div className={`empty-state empty-state--${kind}`}>
+      {glyph && <div className="empty-state__glyph">{glyph}</div>}
       <h2>{title}</h2>
       <p>{description}</p>
-      {loadError && onRetry ? <button type="button" className="button button--primary" onClick={onRetry}><RefreshCw size={15} />{t('app.empty.retry')}</button> : <button type="button" className="button button--primary" onClick={onDemo}><Play size={15} fill="currentColor" />{t('app.empty.demo')}</button>}
-      <span className="empty-state__caption">{t('app.empty.caption')}</span>
+      {kind === 'error' && onRetry && <button type="button" className="button button--primary" onClick={onRetry}><RefreshCw size={15} />{t('app.empty.retry')}</button>}
+      {kind === 'no-sessions' && <div className="empty-state__actions">
+        <button type="button" className="button button--primary" onClick={() => onOpenSettings('servers')}><Plus size={15} />{t('app.empty.addServer')}</button>
+        <button type="button" className="button" onClick={() => onOpenSettings('local')}><Laptop size={15} />{t('app.empty.localSources')}</button>
+      </div>}
     </div>
   );
 }
@@ -816,7 +680,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="detail-metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClose: () => void; onExpand: (agent: Agent) => void; mode: SourceMode }) {
+function AgentDetails({ agent, onClose, onExpand }: { agent?: Agent; onClose: () => void; onExpand: (agent: Agent) => void }) {
   const { t } = useI18n();
   const [trace, setTrace] = useState<TraceEntry[]>([]);
   const [loadingTrace, setLoadingTrace] = useState(false);
@@ -837,14 +701,11 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
     setLoadingTrace(true);
     setTraceError(undefined);
     const bridge = typeof window !== 'undefined' ? window.agentMonitor : undefined;
-    if (mode === 'demo' || !bridge) {
-      const timer = window.setTimeout(() => {
-        if (!cancelled && requestId === requestIdRef.current) {
-          setTrace(sampleTrace(agent));
-          setLoadingTrace(false);
-        }
-      }, 150);
-      return () => { cancelled = true; window.clearTimeout(timer); };
+    if (!bridge) {
+      setTrace([]);
+      setTraceError(t('app.trace.loadFailed'));
+      setLoadingTrace(false);
+      return () => { cancelled = true; };
     }
 
     void bridge.getTrace(agent.id)
@@ -863,7 +724,7 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
       });
 
     return () => { cancelled = true; };
-  }, [agentId, mode, refreshNonce]);
+  }, [agentId, refreshNonce]);
 
   if (!agent) return null;
   const status = STATUS_META[agent.status];
@@ -884,69 +745,110 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   );
 }
 
-function RemoteStatusList({ remotes, remoteErrors }: { remotes: RemoteHostStatus[]; remoteErrors: Record<string, string[]> }) {
-  const { t } = useI18n();
-  const connected = remotes.filter((remote) => remote.state === 'connected').length;
-  return <div className="remote-status">
-    <div className="remote-status__head"><span>{t('app.remote.hosts')}</span><span className="remote-status__count">{t('app.remote.connectedCount', { connected, total: remotes.length })}</span></div>
-    <ul className="remote-status__list">
-      {remotes.map((remote) => {
-        const errors = remoteErrors[remote.id] ?? [];
-        const state = remoteIndicatorState(remote, errors);
-        const title = remoteStatusTitle(remote, errors) + (remote.state !== 'connected' && remote.lastConnectedAt ? `\n${t('app.remote.lastConnected', { time: formatRelative(remote.lastConnectedAt) })}` : '');
-        return <li key={remote.id} className={`remote-status__item remote-status__item--${state}`} title={title} aria-label={title}>
-          <span className="remote-status__dot" aria-hidden="true" /><span className="remote-status__label">{remote.label}</span>
-        </li>;
-      })}
-    </ul>
-  </div>;
-}
+type GroupDot = RemoteIndicatorState | 'unknown';
 
-function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId, remotes, remoteErrors }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string; remotes: RemoteHostStatus[]; remoteErrors: Record<string, string[]> }) {
+type SidebarProps = {
+  runs: AgentRun[];
+  agents: Agent[];
+  selectedRunId?: string;
+  loadedRunId?: string;
+  runTokenSummaries: Record<string, RunTokenSummary>;
+  onSelectRun: (id: string) => void;
+  loadingRunId?: string;
+  mode: SourceMode;
+  watching: boolean;
+  localErrors: string[];
+  remotes: RemoteHostStatus[];
+  remoteErrors: Record<string, string[]>;
+  onOpenSettings: () => void;
+  shortcut: string;
+  style?: CSSProperties;
+};
+
+function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, loadingRunId, mode, watching, localErrors, remotes, remoteErrors, onOpenSettings, shortcut, style }: SidebarProps) {
   const { t } = useI18n();
-  const remotesConfigured = remotes.length > 0;
-  const watcherTitle = usingDemo ? t('app.sidebar.watcherDemo') : watching ? t('app.sidebar.watcherActive') : t('app.sidebar.watcherPaused');
-  const watcherSubtitle = usingDemo ? t('app.sidebar.subtitleDemo') : errors.length ? t('app.sidebar.subtitleIssues', { count: errors.length }) : watching ? t('app.sidebar.subtitleListening') : t('app.sidebar.subtitleConnected');
+  const groups = useMemo(() => groupRunsBySource(runs, remotes), [remotes, runs]);
+  const [collapsed, setCollapsed] = useState(() => readCollapsedGroups());
+  const toggle = (id: string) => setCollapsed((current) => {
+    const next = toggleGroup(current, id);
+    saveCollapsedGroups(next);
+    return next;
+  });
+
+  function renderRun(run: AgentRun) {
+    const selected = run.id === selectedRunId;
+    const loading = run.id === loadingRunId;
+    const summary = runTokenSummaries[run.id];
+    const loaded = run.id === loadedRunId && !loadingRunId;
+    const tokenTotal = (summary?.input ?? 0) + (summary?.output ?? 0);
+    const stale = Boolean(summary && !loaded && run.lastActivityAt && summary.lastActivityAt && run.lastActivityAt > summary.lastActivityAt);
+    const tokenTitle = loaded
+      ? t('app.sidebar.tokensLoaded')
+      : summary
+        ? stale
+          ? t('app.sidebar.tokensStale')
+          : t('app.sidebar.tokensSnapshot')
+        : t('app.sidebar.tokensUnknown');
+    return <button key={run.id} type="button" className={`run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`} onClick={() => onSelectRun(run.id)} aria-busy={loading} aria-current={selected ? 'true' : undefined}>
+      <span className="run-item__body">
+        <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })}</span></span>
+        <span className="run-item__path" title={run.cwd || run.title || t('app.sidebar.currentWorkspace')}>{run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.sidebar.currentWorkspace')}</span>
+        <span className="run-item__meta">
+          <span className="run-item__time">{loading ? t('app.sidebar.loadingAgents') : formatRelative(run.lastActivityAt ?? run.startedAt)}</span>
+          <span className={`run-item__tokens ${!summary && !loaded ? 'run-item__tokens--unknown' : ''} ${stale ? 'run-item__tokens--stale' : ''}`} title={tokenTitle}>
+            {loaded || summary ? <><RollingNumber value={tokenTotal} /> {t('app.sidebar.tokens')}{stale ? ` · ${t('app.sidebar.lastLoaded')}` : ''}</> : t('app.sidebar.loadToSee')}
+          </span>
+        </span>
+      </span>
+      <span className={`run-item__signal ${selected ? 'run-item__signal--active' : ''}`} />
+    </button>;
+  }
+
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={style}>
       <div className="brand"><div className="brand__name">Agent Monitor</div></div>
       <div className="sidebar__nav"><button type="button" className="sidebar-link sidebar-link--active">{t('app.sidebar.overview')}<span className="sidebar-link__shortcut">⌘ 1</span></button><button type="button" className="sidebar-link">{t('app.sidebar.topology')}<span className="sidebar-link__count">{agents.length}</span></button></div>
       <div className="sidebar__section">
         <div className="sidebar__section-head"><span>{t('app.sidebar.recentRuns')}</span><span className="sidebar__section-count">{runs.length}</span></div>
-        <div className="run-list">
-          {runs.map((run) => {
-            const selected = run.id === selectedRunId;
-            const loading = run.id === loadingRunId;
-            const summary = runTokenSummaries[run.id];
-            const loaded = run.id === loadedRunId && !loadingRunId;
-            const hostLabel = runHostLabel(run, remotesConfigured);
-            const tokenTotal = (summary?.input ?? 0) + (summary?.output ?? 0);
-            const stale = Boolean(summary && !loaded && run.lastActivityAt && summary.lastActivityAt && run.lastActivityAt > summary.lastActivityAt);
-            const tokenTitle = loaded
-              ? t('app.sidebar.tokensLoaded')
-              : summary
-                ? stale
-                  ? t('app.sidebar.tokensStale')
-                  : t('app.sidebar.tokensSnapshot')
-                : t('app.sidebar.tokensUnknown');
-            return <button key={run.id} type="button" className={`run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`} onClick={() => onSelectRun(run.id)} aria-busy={loading}>
-              <span className="run-item__body">
-                <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })}</span>{hostLabel && <span className={`host-tag ${run.host ? 'host-tag--remote' : ''}`} title={run.host ? t('app.sidebar.hostRemote', { host: run.host }) : t('app.sidebar.hostLocal')}>{hostLabel}</span>}</span>
-                <span className="run-item__path" title={run.cwd || run.title || t('app.sidebar.currentWorkspace')}>{run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.sidebar.currentWorkspace')}</span>
-                <span className="run-item__meta">
-                  <span className="run-item__time">{loading ? t('app.sidebar.loadingAgents') : formatRelative(run.lastActivityAt ?? run.startedAt)}</span>
-                  <span className={`run-item__tokens ${!summary && !loaded ? 'run-item__tokens--unknown' : ''} ${stale ? 'run-item__tokens--stale' : ''}`} title={tokenTitle}>
-                    {loaded || summary ? <><RollingNumber value={tokenTotal} /> {t('app.sidebar.tokens')}{stale ? ` · ${t('app.sidebar.lastLoaded')}` : ''}</> : t('app.sidebar.loadToSee')}
-                  </span>
-                </span>
-              </span>
-              <span className={`run-item__signal ${selected ? 'run-item__signal--active' : ''}`} />
-            </button>;
-          })}
-        </div>
-        {!runs.length && <div className="sidebar__empty">{t('app.sidebar.noRuns')}</div>}
+        {groups.map((group) => {
+          const open = !collapsed.has(group.id);
+          const name = group.kind === 'local' ? t('remote.local') : group.label;
+          const remote = group.remote;
+          const errors = remote ? remoteErrors[remote.id] ?? [] : [];
+          let dot: GroupDot;
+          let title: string;
+          let emptyText: string;
+          if (group.kind === 'local') {
+            dot = mode === 'loading' ? 'connecting' : mode !== 'live' ? 'unknown' : localErrors.length ? 'warning' : watching ? 'connected' : 'unknown';
+            title = [t('app.sidebar.localGroupTitle'), mode === 'live' ? (watching ? t('app.topbar.localWatcherActive') : t('app.topbar.localWatcherPaused')) : undefined, ...localErrors].filter(Boolean).join('\n');
+            emptyText = t('app.sidebar.noRuns');
+          } else if (remote) {
+            dot = remoteIndicatorState(remote, errors);
+            title = remoteStatusTitle(remote, errors) + (remote.state !== 'connected' && remote.lastConnectedAt ? `\n${t('app.remote.lastConnected', { time: formatRelative(remote.lastConnectedAt) })}` : '');
+            emptyText = remote.state === 'error' ? remote.error ?? errors[0]?.slice(remote.label.length + 3) ?? t('remote.connectionError') : remote.state === 'connecting' ? t('app.sidebar.groupNotConnected') : t('app.sidebar.groupEmpty');
+          } else {
+            dot = 'unknown';
+            title = name;
+            emptyText = t('app.sidebar.groupEmpty');
+          }
+          const listId = `run-group-${group.id}`;
+          return <section key={group.id} className={`run-group run-group--${dot}`}>
+            <button type="button" className="run-group__head" aria-expanded={open} aria-controls={listId} title={title} aria-label={`${open ? t('app.sidebar.collapseGroup', { name }) : t('app.sidebar.expandGroup', { name })}. ${title.split('\n').slice(1).join('. ')}`.trim()} onClick={() => toggle(group.id)}>
+              <ChevronRight size={13} className="run-group__chevron" aria-hidden="true" />
+              <span className="status-dot" aria-hidden="true" />
+              <span className="run-group__name">{name}</span>
+              <span className="run-group__count">{group.runs.length}</span>
+            </button>
+            {open && <div id={listId} className="run-list">
+              {group.runs.map(renderRun)}
+              {!group.runs.length && <div className={`run-group__empty${dot === 'error' ? ' run-group__empty--error' : ''}`} title={emptyText}>{emptyText}</div>}
+            </div>}
+          </section>;
+        })}
       </div>
-      <div className="sidebar__bottom">{remotesConfigured && !usingDemo && <RemoteStatusList remotes={remotes} remoteErrors={remoteErrors} />}<div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title={t('app.sidebar.loadDemoTitle')} onClick={onDemo}>{t('app.sidebar.demo')}</button></div><div className="sidebar__tip"><span>{t('app.sidebar.tip')}</span></div></div>
+      <div className="sidebar__footer">
+        <button type="button" className="sidebar-link sidebar__settings" onClick={onOpenSettings} title={t('settings.open', { shortcut })}><SettingsIcon size={15} aria-hidden="true" />{t('app.sidebar.settings')}<span className="sidebar-link__shortcut">{shortcut}</span></button>
+      </div>
     </aside>
   );
 }
@@ -967,16 +869,16 @@ function App() {
     setTraceTabs(tabs => tabs.filter(tab => tab.id !== id));
     if (activeTraceId === id) setActiveTraceId(null);
   };
-  const { snapshot: sourceSnapshot, mode, setDemo, setLive, usingDemo, loadedRunId, loadingRunId, runLoadError, loadRun } = useMonitorSnapshot();
-  const { providerFilter, hostFilter, selectedRunId, selectedAgentId, setProviderFilter, setHostFilter, resetHostFilter, selectRun, selectAgent } = useDashboardStore();
+  const { snapshot: sourceSnapshot, mode, loadedRunId, loadingRunId, runLoadError, loadRun } = useMonitorSnapshot();
+  const { providerFilter, selectedRunId, selectedAgentId, settingsSection, setProviderFilter, selectRun, selectAgent, openSettings, closeSettings } = useDashboardStore();
+  const bridge = typeof window !== 'undefined' ? window.agentMonitor : undefined;
+  const shortcut = settingsShortcut(bridge?.platform);
   const remotes = useMemo(() => sourceSnapshot.remotes ?? [], [sourceSnapshot.remotes]);
   const remotesConfigured = remotes.length > 0;
-  const hostOptions = useMemo(() => buildHostOptions(remotes), [remotes]);
-  const effectiveHostFilter = resolveHostFilter(hostFilter, remotes);
 
-  const runs = useMemo(() => filterRunsByHost(sourceSnapshot.runs.filter((run) => providerFilter === 'all' || run.harness === providerFilter), effectiveHostFilter).sort(runSort), [effectiveHostFilter, providerFilter, sourceSnapshot.runs]);
+  const runs = useMemo(() => sourceSnapshot.runs.filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
-  const agents = useMemo(() => filterAgentsByHost(sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), sourceSnapshot.runs, effectiveHostFilter), [effectiveHostFilter, providerFilter, sourceSnapshot.agents, sourceSnapshot.runs]);
+  const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const expandedAgent = activeTraceId ? agents.find(agent => agent.id === activeTraceId) ?? traceTabs.find(agent => agent.id === activeTraceId) : undefined;
 
@@ -1015,11 +917,6 @@ function App() {
   }, [loadedRunAgents, loadedRunId, loadedRunMetadata, loadingRunId]);
 
   useEffect(() => {
-    // A host removed from the config should not leave a dangling filter behind if it comes back later.
-    if (mode === 'live' && hostFilter !== effectiveHostFilter) resetHostFilter();
-  }, [effectiveHostFilter, hostFilter, mode, resetHostFilter]);
-
-  useEffect(() => {
     if (selectedRunId && !runs.some((run) => run.id === selectedRunId)) {
       selectRun(undefined);
       selectAgent(null);
@@ -1031,34 +928,47 @@ function App() {
     selectAgent(null);
   }, [agents, selectedAgentId, selectAgent]);
 
+  // ⌘, / Ctrl+, toggles the settings page from anywhere.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== ',' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      if (useDashboardStore.getState().settingsSection) closeSettings(); else openSettings();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [closeSettings, openSettings]);
+
+  // Leaving settings puts focus back on the sidebar's settings button rather than the document body.
+  const settingsWasOpen = useRef(false);
+  useEffect(() => {
+    if (settingsWasOpen.current && !settingsSection) document.querySelector<HTMLElement>('.sidebar__settings')?.focus({ preventScroll: true });
+    settingsWasOpen.current = Boolean(settingsSection);
+  }, [settingsSection]);
+
   const runIsLoaded = Boolean(selectedRun && loadedRunId === selectedRun.id);
   const runAgents = runIsLoaded && selectedRun ? agents.filter((agent) => agent.runId === selectedRun.id) : [];
   const runEdges = selectedRun ? sourceSnapshot.edges.filter((edge) => runAgents.some((agent) => agent.id === edge.source) && runAgents.some((agent) => agent.id === edge.target)) : [];
   const hasGraph = Boolean(runIsLoaded && runAgents.length);
   const showRunTokens = hasGraph && loadingRunId !== selectedRun?.id;
-  const watcherLive = mode === 'live' && sourceSnapshot.watching;
+  const isWatching = mode === 'live' && sourceSnapshot.watching;
   const health = useMemo(() => assessMonitorHealth({ errors: sourceSnapshot.errors, remotes, watching: sourceSnapshot.watching }), [remotes, sourceSnapshot.errors, sourceSnapshot.watching]);
   const monitorErrors = health.visibleErrors;
-  const monitorHasErrors = mode !== 'demo' && health.warning;
-  const liveBadgeTitle = remotesConfigured && mode !== 'demo' ? t('app.remote.hostsConnected', { count: health.totalRemotes, connected: health.connectedRemotes, total: health.totalRemotes }) : undefined;
-  const isWatching = watcherLive || mode === 'demo';
-  const statusLabel = mode === 'demo'
-    ? t('app.topbar.statusDemo')
-    : mode === 'loading'
-      ? t('app.topbar.statusConnecting')
-      : mode === 'offline'
-        ? t('app.topbar.statusOffline')
-        : sourceSnapshot.watching
-          ? monitorHasErrors ? t('app.topbar.statusLiveIssues') : t('app.topbar.statusLive')
-          : t('app.topbar.statusConnected');
-
-  const handleDemo = useCallback(() => {
-    setTraceTabs([]);
-    setActiveTraceId(null);
-    setDemo();
-    selectRun(DEMO_SNAPSHOT.runs[0]?.id);
-    selectAgent(null);
-  }, [selectAgent, selectRun, setDemo]);
+  const monitorHasErrors = mode === 'live' && health.warning;
+  const liveBadgeTitle = mode === 'live' ? [
+    sourceSnapshot.watching ? t('app.topbar.localWatcherActive') : t('app.topbar.localWatcherPaused'),
+    health.localErrors.length ? t('app.sidebar.subtitleIssues', { count: health.localErrors.length }) : undefined,
+    remotesConfigured ? t('app.remote.hostsConnected', { count: health.totalRemotes, connected: health.connectedRemotes, total: health.totalRemotes }) : undefined,
+  ].filter(Boolean).join('\n') : undefined;
+  const statusLabel = mode === 'loading'
+    ? t('app.topbar.statusConnecting')
+    : mode === 'offline'
+      ? t('app.topbar.statusOffline')
+      : sourceSnapshot.watching
+        ? monitorHasErrors ? t('app.topbar.statusLiveIssues') : t('app.topbar.statusLive')
+        : t('app.topbar.statusConnected');
+  const providerName = PROVIDERS.find((provider) => provider.value === providerFilter);
 
   const handleRunSelect = useCallback((runId: string) => {
     setTraceTabs([]);
@@ -1068,19 +978,13 @@ function App() {
     void loadRun(runId);
   }, [loadRun, selectAgent, selectRun]);
 
-  const handleReturnLive = useCallback(() => {
-    setTraceTabs([]);
-    setActiveTraceId(null);
-    setLive();
-    selectRun(undefined);
-    selectAgent(null);
-  }, [selectAgent, selectRun, setLive]);
-
+  const hidden = settingsSection ? { display: 'none' } : undefined;
   return (
     <div className="app-shell">
-      {!expandedAgent && <Sidebar runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={health.localErrors} loadingRunId={loadingRunId} remotes={remotes} remoteErrors={health.remoteErrors} />}
-      <main className="workspace">
-        <header className={`topbar ${hostOptions.length > 0 ? 'topbar--with-host' : ''}`}><div className="topbar__context"><span className="topbar__section-label">{t('app.topbar.workspace')}</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.agentActivity')}</span></div><div className="topbar__controls"><ServersControl remotes={usingDemo ? undefined : remotes} /><ThemeSelector /><LanguageSelector /><Dropdown label={t('app.topbar.provider')} value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.labelKey ? t(provider.labelKey) : provider.label ?? '' }))} onChange={value => setProviderFilter(value as ProviderFilter)} />{hostOptions.length > 0 && <Dropdown label={t('app.topbar.host')} value={effectiveHostFilter} options={hostOptions} onChange={setHostFilter} />}<Dropdown label={t('app.topbar.run')} value={selectedRun?.id ?? ''} placeholder={t('app.topbar.selectRun')} wide options={runs.map(run => { const host = runHostLabel(run, remotesConfigured); return { value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.workspaceFallback'), description: `${host ? `${host} · ` : ''}${providerLabel(run.harness)} · ${t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })} · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }; })} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`} title={liveBadgeTitle}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>{t('app.topbar.returnLive')}</button>}</div></header>
+      {settingsSection && <SettingsPage bridge={bridge} section={settingsSection} onSection={openSettings} onClose={closeSettings} mode={mode} watching={sourceSnapshot.watching} localErrors={health.localErrors} remotes={remotes} remoteErrors={health.remoteErrors} />}
+      {!expandedAgent && <Sidebar style={hidden} runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} loadingRunId={loadingRunId} mode={mode} watching={sourceSnapshot.watching} localErrors={health.localErrors} remotes={remotes} remoteErrors={health.remoteErrors} onOpenSettings={() => openSettings()} shortcut={shortcut} />}
+      <main className="workspace" style={hidden}>
+        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">{t('app.topbar.workspace')}</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.agentActivity')}</span></div><div className="topbar__controls"><Dropdown label={t('app.topbar.provider')} value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.labelKey ? t(provider.labelKey) : provider.label ?? '' }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label={t('app.topbar.run')} value={selectedRun?.id ?? ''} placeholder={t('app.topbar.selectRun')} wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.workspaceFallback'), description: `${remotesConfigured ? `${run.host ?? t('remote.local')} · ` : ''}${providerLabel(run.harness)} · ${t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })} · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><button type="button" className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`} title={liveBadgeTitle} onClick={() => openSettings('about')}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</button></div></header>
         {traceTabs.length > 0 && <div className="workspace-tabs" role="tablist" aria-label={t('app.tabs.views')} onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
@@ -1101,12 +1005,12 @@ function App() {
         {monitorHasErrors && monitorErrors.length > 0 && <div className="monitor-error-strip" role="status"><TriangleAlert size={14} /><span><strong>{t('app.subbar.issueLabel', { count: monitorErrors.length })}</strong> {monitorErrors[0]}</span>{monitorErrors.length > 1 && <span className="monitor-error-strip__count">{t('app.subbar.more', { count: monitorErrors.length - 1 })}</span>}</div>}
         <div className="workspace__body">
           <section className={`canvas-panel ${selectedAgent ? 'canvas-panel--with-details' : ''}`}>
-            {hasGraph ? <AgentGraph runId={selectedRun?.id} agents={runAgents} edges={runEdges} selectedAgentId={selectedAgentId} onSelectAgent={selectAgent} onOpenTrace={openTrace} /> : <EmptyGraph mode={mode} selectedRun={selectedRun} loading={Boolean(loadingRunId && loadingRunId === selectedRun?.id)} loadError={selectedRun?.id === selectedRunId ? runLoadError : undefined} onDemo={handleDemo} onRetry={selectedRun ? () => handleRunSelect(selectedRun.id) : undefined} />}
+            {hasGraph ? <AgentGraph runId={selectedRun?.id} agents={runAgents} edges={runEdges} selectedAgentId={selectedAgentId} onSelectAgent={selectAgent} onOpenTrace={openTrace} /> : <EmptyGraph mode={mode} selectedRun={selectedRun} hasRuns={runs.length > 0} hasAnyRuns={sourceSnapshot.runs.length > 0} providerName={providerName?.labelKey ? t(providerName.labelKey) : providerName?.label ?? ''} loading={Boolean(loadingRunId && loadingRunId === selectedRun?.id)} loadError={selectedRun?.id === selectedRunId ? runLoadError : undefined} onRetry={selectedRun ? () => handleRunSelect(selectedRun.id) : undefined} onOpenSettings={openSettings} />}
           </section>
-          {selectedAgent && <AgentDetails agent={selectedAgent} onClose={() => selectAgent(null)} onExpand={openTrace} mode={mode} />}
+          {selectedAgent && <AgentDetails agent={selectedAgent} onClose={() => selectAgent(null)} onExpand={openTrace} />}
         </div>
         </div>
-        {expandedAgent && <div id="expanded-trace-panel" role="tabpanel" aria-label={t('app.tabs.expandedTrace')} className="workspace-trace-panel"><TraceWorkspace key={expandedAgent.id} agent={expandedAgent} agents={agents.filter(agent => agent.runId === expandedAgent.runId)} onOpenAgent={openTrace} onOpenAgents={openTraces} demo={usingDemo} /></div>}
+        {expandedAgent && <div id="expanded-trace-panel" role="tabpanel" aria-label={t('app.tabs.expandedTrace')} className="workspace-trace-panel"><TraceWorkspace key={expandedAgent.id} agent={expandedAgent} agents={agents.filter(agent => agent.runId === expandedAgent.runId)} onOpenAgent={openTrace} onOpenAgents={openTraces} /></div>}
       </main>
     </div>
   );

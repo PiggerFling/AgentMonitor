@@ -31,11 +31,6 @@ export const trace = {
   mainAgent: 'Main agent',
   subagent: 'Subagent',
   unknownModel: 'Unknown model',
-  demo: {
-    discovered: '{title} session discovered by the monitor.',
-    activity: 'Working through the current task.',
-    result: 'Found renderer entry points and shared agent types.',
-  },
   error: {
     unavailable: 'The native monitor is unavailable in this browser session.',
     loadFailed: 'Trace could not be loaded from the native monitor.',

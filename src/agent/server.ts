@@ -103,7 +103,8 @@ export function createAgentServer(monitor: AgentMonitor, options: AgentServerOpt
   });
   const close = server.close.bind(server);
   server.close = (callback?: (error?: Error) => void) => {
-    for (const client of clients) client.destroy();
+    // Detach now rather than on each response's close event, which can arrive after the caller resumes.
+    for (const client of [...clients]) { client.destroy(); detach(client); }
     return close(callback);
   };
   return server;

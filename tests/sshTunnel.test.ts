@@ -7,6 +7,7 @@ import test from 'node:test';
 import { SshTunnel, type SshTunnelOptions } from '../src/main/remote/sshTunnel';
 
 // Stands in for ssh: "ok" serves its argv on the -L local port, "auth" fails like a rejected key, "hang" never forwards.
+// The tunnel's readiness probe resets its connection on Windows; ignore that socket error like ssh would.
 const FAKE_SSH = `
 const net = require('node:net');
 const args = process.argv.slice(2);
@@ -15,7 +16,7 @@ if (host === 'auth') { process.stderr.write('Warning: something\\nuser@auth: Per
 if (host === 'hang') setInterval(() => {}, 1000);
 else {
   const port = Number(args[args.indexOf('-L') + 1].split(':')[1]);
-  setTimeout(() => net.createServer(socket => socket.end(JSON.stringify(args))).listen(port, '127.0.0.1'), 150);
+  setTimeout(() => net.createServer(socket => socket.on('error', () => {}).end(JSON.stringify(args))).listen(port, '127.0.0.1'), 150);
 }
 `;
 

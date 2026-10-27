@@ -11,11 +11,23 @@ Default sources:
 | Pi | `$PI_CODING_AGENT_DIR/sessions` or `~/.pi/agent/sessions` |
 | Hermes | `$HERMES_HOME/state.db`, `session-exports/traces`, and `sessions`, defaulting to `~/.hermes` |
 
+A data directory that already ends in the trace subdirectory (e.g. `CODEX_HOME=/data/sessions`) is watched as is.
+
+### Settings
+
+The app's settings choose which tools to watch on this machine and can replace each tool's data directory (the value of its variable above). They are stored in `settings.json` next to `servers.json` in the app's data directory, or in the file `AGENT_MONITOR_SETTINGS_FILE` names:
+
+```json
+{ "local": { "tools": ["claude", "codex"], "traceDirs": { "codex": "/home/alice/.config/codex" } } }
+```
+
+`tools` lists any of `claude`, `codex`, `pi`, `hermes` (missing means all); `traceDirs` holds absolute paths and wins over the variables. Saving from the app restarts the local watchers right away: runs of disabled tools disappear and runs from the new directories appear. An invalid file is reported in the error list and the defaults are used. Remote servers have the same options per entry, see [Remote servers](remote.md).
+
 Hermes database discovery reads session metadata only; message bodies are queried only for the selected run. The database is opened read-only. Native Hermes sessions take precedence when an export has the same session ID. Claude nested subagent files and explicitly marked Hermes subagents produce spawn edges. Pi message-tree links and Hermes compression continuations are not treated as spawned agents.
 
 No manual file selection is needed. No traces are uploaded and no trace content is executed. The renderer has no Node access; a narrow, isolated IPC bridge exposes snapshots and normalized trace entries for discovered agents.
 
-To use a fixture directory or another JSONL trace location (this override disables the default sources, including the Hermes database):
+To use a fixture directory or another JSONL trace location (this override disables the default sources, including the Hermes database, and ignores the tool settings):
 
 ```sh
 AGENT_MONITOR_TRACE_ROOT=/absolute/path/to/sessions npm run dev

@@ -15,9 +15,11 @@ Requirements on the server: Linux or macOS, `/bin/sh`, Node.js 22.12+, and key-b
 
 The app's **Servers** panel lists the concrete hosts of `~/.ssh/config` (including `Include`d files; wildcard `Host` patterns and `Match` blocks are skipped). Adding one runs these steps over ssh, without scp or sftp:
 
-1. **Probe**: runs a small `sh` script (`ssh -T -o BatchMode=yes -o ClearAllForwardings=yes -- <host> sh -s`) that reports the home directory, `uname -s`/`-m`, and every Node.js it can find: `node` on the non-login `PATH`, `node` on the login shell's `PATH`, nvm (`~/.nvm/versions/node/*`), fnm (`~/.local/share/fnm/node-versions/*`), Volta, asdf, `/usr/local/bin`, `/opt/homebrew/bin` and `/usr/bin`. The newest version that is at least 22.12 is used, by absolute path, because commands run over ssh do not load nvm/fnm/volta `PATH` changes.
+1. **Probe**: runs a small `sh` script (`ssh -T -o BatchMode=yes -o ClearAllForwardings=yes -- <host> sh -s`) that reports the home directory, `uname -s`/`-m`, and every Node.js it can find: `node` on the non-login `PATH`, `node` on the login shell's `PATH`, nvm (`~/.nvm/versions/node/*`), fnm (`~/.local/share/fnm/node-versions/*`), Volta, asdf, `/usr/local/bin`, `/opt/homebrew/bin` and `/usr/bin`. The newest version that is at least 22.12 is used, by absolute path, because commands run over ssh do not load nvm/fnm/volta `PATH` changes. It also reads each tool's data directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `HERMES_HOME`) from the `env` of an interactive login shell (`$SHELL -ilc`), since variables exported only in `~/.zshrc` or `~/.bashrc` are invisible to the agent's non-interactive session; it falls back to the session's own variable and then to the default, and reports which directories exist. The login shell runs with stdin from `/dev/null`, its output goes to a temp file and only what follows a marker line counts, and it is killed after 8 seconds, so banners or a hanging rc file cannot break the probe.
 2. **Install**: creates `~/.agent-monitor` (mode 700), streams the app's bundled `agent.cjs` into it through ssh's stdin, checks its sha256 on the server (`sha256sum`, `shasum -a 256` or `openssl`), and only then writes `~/.agent-monitor/agent.sha256` containing just the hex hash.
-3. **Save**: appends an entry to `servers.json` (written atomically; other entries and fields are kept) and connects right away.
+3. **Save**: appends an entry to `servers.json` (written atomically; other entries and fields are kept) and connects right away. The entry records the label, extra ssh options, tools and data directories chosen in the form; when no directories were chosen, the detected ones that differ from the defaults are saved, so for example a `CODEX_HOME` exported in `~/.zshrc` works without further setup.
+
+The form can run the probe alone first (nothing is installed) to fill in the detected directories and show which tools are present. Editing a server later changes its label, ssh options, tools and directories; the entry is rewritten atomically and the server reconnects with them.
 
 Failures are reported with a reason: the key was rejected, the host key is unknown (the app shows its fingerprint and can retry with `StrictHostKeyChecking=accept-new` once you confirm it, or run `ssh <host>` once yourself), the host key changed, the host is unreachable, the OS is not Linux/macOS, or Node.js is missing or older than 22.12. To install Node.js for your user, for example with nvm:
 
@@ -32,10 +34,11 @@ Removing a server stops it and deletes its entry; optionally the app also delete
 The entry records the absolute home directory and node path found by the probe:
 
 ```json
-{ "id": "dev-1", "ssh": "dev-1", "managed": true, "home": "/home/alice", "nodePath": "/home/alice/.nvm/versions/node/v22.12.0/bin/node" }
+{ "id": "dev-1", "ssh": "dev-1", "managed": true, "home": "/home/alice", "nodePath": "/home/alice/.nvm/versions/node/v22.12.0/bin/node",
+  "tools": ["claude", "codex"], "traceDirs": { "codex": "/home/alice/.config/codex" } }
 ```
 
-`home` and `nodePath` must be absolute paths without `'`, `\` or control characters. For each connection the app runs
+`home`, `nodePath` and the `traceDirs` values must be absolute paths without `'`, `\` or control characters. For each connection the app runs
 
 ```
 ssh -T -e none -o BatchMode=yes -o ClearAllForwardings=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 <sshArgs> -- <ssh> sh -c '<script>'
@@ -44,8 +47,10 @@ ssh -T -e none -o BatchMode=yes -o ClearAllForwardings=yes -o ServerAliveInterva
 where `<script>` (single-quoted as a whole, so bash, zsh, fish and csh login shells all pass it to `sh` unchanged) is
 
 ```sh
-cd '<home>/.agent-monitor' && [ "$(cat agent.sha256 2>/dev/null)" = '<sha256 of the bundled agent>' ] || exit 42; exec '<nodePath>' agent.cjs --stdio
+cd '<home>/.agent-monitor' && [ "$(cat agent.sha256 2>/dev/null)" = '<sha256 of the bundled agent>' ] || exit 42; exec '<nodePath>' agent.cjs --stdio ['--tools=<tools>'] ['--<tool>-dir=<dir>' ...]
 ```
+
+`--tools=claude,codex` is added when `tools` is set and one `--<tool>-dir=<dir>` per `traceDirs` entry, each single-quoted as one word (see [Agent options](#agent-options)). They change only the command line, not `agent.cjs`, so the sha256 check is unaffected.
 
 The agent prints `agent-monitor ready` on stdout; anything the login shell printed before that line is ignored. After it, stdin and stdout carry multiplexed connections to the agent's HTTP server ([`src/shared/streamMux.ts`](../src/shared/streamMux.ts)), and the app serves them to itself on a free port on its own `127.0.0.1`. The agent exits when ssh closes its stdin.
 
@@ -72,7 +77,18 @@ Or build once (`npm run build:main`) and copy the single file `dist-agent/agent.
 node agent.cjs              # --port <port> or AGENT_MONITOR_PORT to change 8787
 ```
 
-The agent prints `agent-monitor ready` once it is listening. To keep it running, a systemd user unit (`~/.config/systemd/user/agent-monitor.service`):
+The agent prints `agent-monitor ready` once it is listening.
+
+#### Agent options
+
+| Option | |
+| --- | --- |
+| `--tools <list>` | Comma-separated tools to watch, of `claude`, `codex`, `pi`, `hermes`; default all, `""` for none |
+| `--claude-dir`, `--codex-dir`, `--pi-dir`, `--hermes-dir <dir>` | A tool's data directory (absolute); default `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$PI_CODING_AGENT_DIR`, `$HERMES_HOME` or their defaults |
+
+`AGENT_MONITOR_TRACE_ROOT` replaces all of these with one directory. A manual agent takes these options from its own command line (e.g. in `ExecStart`); the `tools` and `traceDirs` fields of a manual server's `servers.json` entry are stored but cannot be applied by the app.
+
+To keep it running, a systemd user unit (`~/.config/systemd/user/agent-monitor.service`):
 
 ```ini
 [Unit]
@@ -118,6 +134,10 @@ Create `servers.json` in the app's data directory, or point `AGENT_MONITOR_SERVE
 | `remotePort` | Agent port on the server; defaults to 8787 (manual servers) |
 | `sshArgs` | Extra `ssh` options placed before the destination |
 | `managed`, `home`, `nodePath` | Managed servers only, see [Managed servers](#managed-servers) |
+| `tools` | Tools to watch, of `claude`, `codex`, `pi`, `hermes`; missing means all. Passed to managed agents only |
+| `traceDirs` | Data directory per tool, e.g. `{"codex": "/home/alice/.config/codex"}`; absolute, without `'`, `\` or control characters; missing tools use the server's variable or default. Passed to managed agents only |
+
+Fields the app does not know are kept when it rewrites the file.
 
 Invalid entries are skipped and reported in the app's error list. A missing file means no remote servers.
 

@@ -30,6 +30,8 @@ Default sources:
 | Pi | `$PI_CODING_AGENT_DIR/sessions` or `~/.pi/agent/sessions` |
 | Hermes | `$HERMES_HOME/state.db`, `session-exports/traces`, and `sessions`, defaulting to `~/.hermes` |
 
+The app's settings can turn tools off or point them at other data directories, for this machine and for each server (see [Discovery and privacy](docs/discovery-and-privacy.md#settings)).
+
 ## Remote servers
 
 Monitor agents on other machines too: pick a host from your `~/.ssh/config` in the app's Servers panel and the app installs a small headless agent there over SSH and runs it for each connection, using your existing keys. You can also run the agent yourself and list the server in `servers.json`. See [Remote servers](docs/remote.md).

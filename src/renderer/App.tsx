@@ -64,6 +64,7 @@ import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
+import { useNumberFormat } from './numberFormat';
 import { formatNumber, formatRelativeTime, t, useI18n, type MessageKey } from './i18n';
 import { SettingsPage, settingsShortcut, type MonitorMode } from './SettingsPage';
 import { assessMonitorHealth, groupRunsBySource, readCollapsedGroups, remoteIndicatorState, remoteStatusTitle, saveCollapsedGroups, toggleGroup, type RemoteIndicatorState } from './remoteUi';
@@ -129,17 +130,6 @@ const TRACE_KIND_LABEL: Record<TraceEntry['kind'], MessageKey> = {
 
 function now() {
   return Date.now();
-}
-
-function formatCompact(value: number | undefined) {
-  if (!value) return '0';
-  if (value >= 1000000) return `${formatNumber(value / 1000000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}m`;
-  if (value >= 1000) { const digits = value >= 10000 ? 0 : 1; return `${formatNumber(value / 1000, { minimumFractionDigits: digits, maximumFractionDigits: digits })}k`; }
-  return formatNumber(value);
-}
-
-function formatExactNumber(value: number | undefined) {
-  return formatNumber(value ?? 0);
 }
 
 function formatRelative(timestamp: number | undefined) {
@@ -314,6 +304,7 @@ function computeDagrePositions(agents: Agent[], edges: AgentEdge[]) {
 
 function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useI18n();
+  const { count, title } = useNumberFormat();
   const { agent, pulse, arrived, onOpenTrace } = data;
   const status = STATUS_META[agent.status];
   const statusLabel = t(status.labelKey);
@@ -353,9 +344,9 @@ function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
       </div>
       <div className="agent-node__activity"><span>{agent.activity || t('app.agent.waiting')}</span></div>
       <div className="agent-node__metrics">
-        <div><span>{t('app.agent.metricIn')}</span><strong>{formatCompact(agent.stats.inputTokens)}</strong></div>
-        <div><span>{t('app.agent.metricOut')}</span><strong>{formatCompact(agent.stats.outputTokens)}</strong></div>
-        <div><span>{t('app.agent.metricTools')}</span><strong>{formatCompact(agent.stats.toolCalls)}</strong></div>
+        <div><span>{t('app.agent.metricIn')}</span><strong title={title(agent.stats.inputTokens)}>{count(agent.stats.inputTokens)}</strong></div>
+        <div><span>{t('app.agent.metricOut')}</span><strong title={title(agent.stats.outputTokens)}>{count(agent.stats.outputTokens)}</strong></div>
+        <div><span>{t('app.agent.metricTools')}</span><strong>{formatNumber(agent.stats.toolCalls)}</strong></div>
       </div>
       <footer className="agent-node__footer"><span>{agent.role || (isMain ? t('app.agent.mainRole') : agent.type)}</span><span>{formatRelative(agent.lastActivityAt)}</span></footer>
       <Handle type="source" position={Position.Bottom} className="agent-node__handle" />
@@ -676,12 +667,13 @@ function TraceList({ entries, loading }: { entries: TraceEntry[]; loading: boole
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="detail-metric"><span>{label}</span><strong>{value}</strong></div>;
+function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <div className="detail-metric"><span>{label}</span><strong title={title}>{value}</strong></div>;
 }
 
 function AgentDetails({ agent, onClose, onExpand }: { agent?: Agent; onClose: () => void; onExpand: (agent: Agent) => void }) {
   const { t } = useI18n();
+  const { count, title: exactTitle } = useNumberFormat();
   const [trace, setTrace] = useState<TraceEntry[]>([]);
   const [loadingTrace, setLoadingTrace] = useState(false);
   const [traceError, setTraceError] = useState<string>();
@@ -738,7 +730,7 @@ function AgentDetails({ agent, onClose, onExpand }: { agent?: Agent; onClose: ()
       <div className="details-chip-row"><span className="chip chip--muted">{providerLabel(agent.harness)}</span><span className="chip chip--muted">{agent.model || t('app.agent.modelPending')}</span><span className="chip chip--muted">{agent.reasoningEffort || t('app.agent.effortDefault')}</span></div>
 
       <section className="details-section"><div className="details-section__label">{t('app.details.sessionMetadata')}</div><dl className="details-list"><div><dt>{t('app.details.harness')}</dt><dd>{providerLabel(agent.harness)}</dd></div><div><dt>{t('app.details.provider')}</dt><dd>{agent.provider || '—'}</dd></div><div><dt>{t('app.details.role')}</dt><dd>{agent.role || agent.type}</dd></div><div><dt>{t('app.details.lastActivity')}</dt><dd>{formatRelative(agent.lastActivityAt)}</dd></div><div><dt>{t('app.details.duration')}</dt><dd>{formatDuration(agent.createdAt)}</dd></div></dl></section>
-      <section className="details-section"><div className="details-section__label">{t('app.details.usage')}</div><div className="detail-metric-grid"><Metric label={t('app.details.input')} value={formatExactNumber(agent.stats.inputTokens)} /><Metric label={t('app.details.output')} value={formatExactNumber(agent.stats.outputTokens)} /><Metric label={t('app.details.toolCalls')} value={formatExactNumber(agent.stats.toolCalls)} /><Metric label={t('app.details.errors')} value={formatExactNumber(agent.stats.errors)} /></div></section>
+      <section className="details-section"><div className="details-section__label">{t('app.details.usage')}</div><div className="detail-metric-grid"><Metric label={t('app.details.input')} value={count(agent.stats.inputTokens)} title={exactTitle(agent.stats.inputTokens)} /><Metric label={t('app.details.output')} value={count(agent.stats.outputTokens)} title={exactTitle(agent.stats.outputTokens)} /><Metric label={t('app.details.toolCalls')} value={formatNumber(agent.stats.toolCalls)} /><Metric label={t('app.details.errors')} value={formatNumber(agent.stats.errors)} /></div></section>
       <section className="details-section details-section--trace"><div className="details-section__title"><div><div className="details-section__label">{t('app.details.normalizedTrace')}</div><span>{t('app.details.liveEvents')}</span></div><button type="button" className="trace-open-button" title={t('app.details.refreshTrace')} onClick={() => setRefreshNonce((value) => value + 1)}><RefreshCw size={13} /></button></div>{traceError ? <div className="trace-placeholder trace-placeholder--error"><AlertCircle size={14} />{traceError}</div> : <TraceList entries={trace} loading={loadingTrace} />}</section>
       <div className="details-pane__footer"><span><CircleDot size={11} />{agent.threadId ? t('app.details.thread', { id: agent.threadId.slice(0, 12) }) : t('app.details.threadUnavailable')}</span><button type="button" className="button button--quiet" onClick={() => onExpand(agent)}>{t('app.details.openTraceTab')}</button></div>
     </aside>

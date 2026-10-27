@@ -20,6 +20,13 @@ export const zhCN: Messages = {
     dropdown: {
       select: '选择',
     },
+    numberFormat: {
+      label: '数字格式',
+      compact: '紧凑（K/M）',
+      full: '完整',
+      compactShort: 'K/M',
+      fullShort: '1,234',
+    },
   },
   app: {
     providers: {
@@ -498,11 +505,12 @@ export const zhCN: Messages = {
     },
     needsDesktop: '仅在桌面应用中可用。此浏览器页面未连接到 Agent Monitor。',
     general: {
-      description: 'Agent Monitor 的外观。',
+      description: 'Agent Monitor 的外观与数字显示方式。',
       theme: '主题',
       themeHint: '整个窗口的配色。',
       language: '语言',
       languageHint: '界面语言。',
+      numberFormatHint: 'Token 数量的显示方式，例如 97.6M 或 97,574,015。',
     },
     local: {
       description: 'Agent Monitor 在这台电脑上监视哪些工具，以及它们的数据位置。',

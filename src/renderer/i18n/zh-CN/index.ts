@@ -138,6 +138,13 @@ export const zhCN: Messages = {
       overview: '概览',
       topology: '智能体拓扑',
       recentRuns: '最近运行',
+      range: {
+        label: '显示在此期间有活动的运行',
+        day: { short: '1天', title: '最近 1 天', empty: '最近 1 天没有运行' },
+        week: { short: '7天', title: '最近 7 天', empty: '最近 7 天没有运行' },
+        month: { short: '30天', title: '最近 30 天', empty: '最近 30 天没有运行' },
+        all: { short: '全部', title: '全部运行', empty: '暂无运行' },
+      },
       noRuns: '尚未发现运行。',
       agentCount: {
         other: '{count} 个智能体',

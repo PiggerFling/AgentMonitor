@@ -65,6 +65,8 @@ import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
 import { useNumberFormat } from './numberFormat';
+import { Segmented } from './Segmented';
+import { activeRunIds, filterRunsByTime, readRunTimeRange, RUN_TIME_RANGES, saveRunTimeRange, type RunTimeRange } from './runFilter';
 import { formatNumber, formatRelativeTime, t, useI18n, type MessageKey } from './i18n';
 import { SettingsPage, settingsShortcut, type MonitorMode } from './SettingsPage';
 import { assessMonitorHealth, groupRunsBySource, readCollapsedGroups, remoteIndicatorState, remoteStatusTitle, saveCollapsedGroups, toggleGroup, type RemoteIndicatorState } from './remoteUi';
@@ -740,7 +742,12 @@ function AgentDetails({ agent, onClose, onExpand }: { agent?: Agent; onClose: ()
 type GroupDot = RemoteIndicatorState | 'unknown';
 
 type SidebarProps = {
+  /** Runs within the time range (plus active and selected ones). */
   runs: AgentRun[];
+  /** Every run, to tell an empty group from one whose runs the time range hides. */
+  allRuns: AgentRun[];
+  timeRange: RunTimeRange;
+  onTimeRange: (range: RunTimeRange) => void;
   agents: Agent[];
   selectedRunId?: string;
   loadedRunId?: string;
@@ -757,9 +764,10 @@ type SidebarProps = {
   style?: CSSProperties;
 };
 
-function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, loadingRunId, mode, watching, localErrors, remotes, remoteErrors, onOpenSettings, shortcut, style }: SidebarProps) {
+function Sidebar({ runs, allRuns, timeRange, onTimeRange, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, loadingRunId, mode, watching, localErrors, remotes, remoteErrors, onOpenSettings, shortcut, style }: SidebarProps) {
   const { t } = useI18n();
   const groups = useMemo(() => groupRunsBySource(runs, remotes), [remotes, runs]);
+  const totals = useMemo(() => new Map(groupRunsBySource(allRuns, remotes).map((group) => [group.id, group.runs.length])), [allRuns, remotes]);
   const [collapsed, setCollapsed] = useState(() => readCollapsedGroups());
   const toggle = (id: string) => setCollapsed((current) => {
     const next = toggleGroup(current, id);
@@ -801,7 +809,12 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
       <div className="brand"><div className="brand__name">Agent Monitor</div></div>
       <div className="sidebar__nav"><button type="button" className="sidebar-link sidebar-link--active">{t('app.sidebar.overview')}<span className="sidebar-link__shortcut">⌘ 1</span></button><button type="button" className="sidebar-link">{t('app.sidebar.topology')}<span className="sidebar-link__count">{agents.length}</span></button></div>
       <div className="sidebar__section">
-        <div className="sidebar__section-head"><span>{t('app.sidebar.recentRuns')}</span><span className="sidebar__section-count">{runs.length}</span></div>
+        <div className="sidebar__section-head">
+          <span>{t('app.sidebar.recentRuns')}</span>
+          <Segmented small label={t('app.sidebar.range.label')} value={timeRange} onChange={onTimeRange}
+            options={RUN_TIME_RANGES.map((range) => ({ value: range, label: t(`app.sidebar.range.${range}.short`), title: t(`app.sidebar.range.${range}.title`) }))} />
+          <span className="sidebar__section-count">{runs.length}</span>
+        </div>
         {groups.map((group) => {
           const open = !collapsed.has(group.id);
           const name = group.kind === 'local' ? t('remote.local') : group.label;
@@ -823,6 +836,8 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
             title = name;
             emptyText = t('app.sidebar.groupEmpty');
           }
+          // Runs exist but are older than the time range: say so instead of "no runs".
+          if (!group.runs.length && (totals.get(group.id) ?? 0) > 0 && dot !== 'error') emptyText = t(`app.sidebar.range.${timeRange}.empty`);
           const listId = `run-group-${group.id}`;
           return <section key={group.id} className={`run-group run-group--${dot}`}>
             <button type="button" className="run-group__head" aria-expanded={open} aria-controls={listId} title={title} aria-label={`${open ? t('app.sidebar.collapseGroup', { name }) : t('app.sidebar.expandGroup', { name })}. ${title.split('\n').slice(1).join('. ')}`.trim()} onClick={() => toggle(group.id)}>
@@ -869,6 +884,16 @@ function App() {
   const remotesConfigured = remotes.length > 0;
 
   const runs = useMemo(() => sourceSnapshot.runs.filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
+  const [timeRange, setTimeRange] = useState<RunTimeRange>(() => readRunTimeRange());
+  const changeTimeRange = useCallback((range: RunTimeRange) => { setTimeRange(range); saveRunTimeRange(range); }, []);
+  // Re-filter once a minute so runs leave the range without waiting for a snapshot.
+  const [clock, setClock] = useState(now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const liveRunIds = useMemo(() => activeRunIds(sourceSnapshot.agents), [sourceSnapshot.agents]);
+  const recentRuns = useMemo(() => filterRunsByTime(runs, timeRange, { now: clock, activeRunIds: liveRunIds, selectedRunId }), [clock, liveRunIds, runs, selectedRunId, timeRange]);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
@@ -974,9 +999,9 @@ function App() {
   return (
     <div className="app-shell">
       {settingsSection && <SettingsPage bridge={bridge} section={settingsSection} onSection={openSettings} onClose={closeSettings} mode={mode} watching={sourceSnapshot.watching} localErrors={health.localErrors} remotes={remotes} remoteErrors={health.remoteErrors} />}
-      {!expandedAgent && <Sidebar style={hidden} runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} loadingRunId={loadingRunId} mode={mode} watching={sourceSnapshot.watching} localErrors={health.localErrors} remotes={remotes} remoteErrors={health.remoteErrors} onOpenSettings={() => openSettings()} shortcut={shortcut} />}
+      {!expandedAgent && <Sidebar style={hidden} runs={recentRuns} allRuns={runs} timeRange={timeRange} onTimeRange={changeTimeRange} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} loadingRunId={loadingRunId} mode={mode} watching={sourceSnapshot.watching} localErrors={health.localErrors} remotes={remotes} remoteErrors={health.remoteErrors} onOpenSettings={() => openSettings()} shortcut={shortcut} />}
       <main className="workspace" style={hidden}>
-        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">{t('app.topbar.workspace')}</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.agentActivity')}</span></div><div className="topbar__controls"><Dropdown label={t('app.topbar.provider')} value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.labelKey ? t(provider.labelKey) : provider.label ?? '' }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label={t('app.topbar.run')} value={selectedRun?.id ?? ''} placeholder={t('app.topbar.selectRun')} wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.workspaceFallback'), description: `${remotesConfigured ? `${run.host ?? t('remote.local')} · ` : ''}${providerLabel(run.harness)} · ${t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })} · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><button type="button" className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`} title={liveBadgeTitle} onClick={() => openSettings('about')}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</button></div></header>
+        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">{t('app.topbar.workspace')}</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.agentActivity')}</span></div><div className="topbar__controls"><Dropdown label={t('app.topbar.provider')} value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.labelKey ? t(provider.labelKey) : provider.label ?? '' }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label={t('app.topbar.run')} value={selectedRun?.id ?? ''} placeholder={t('app.topbar.selectRun')} wide options={recentRuns.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || t('app.topbar.workspaceFallback'), description: `${remotesConfigured ? `${run.host ?? t('remote.local')} · ` : ''}${providerLabel(run.harness)} · ${t('app.sidebar.agentCount', { count: runAgentCount(run, agents) })} · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><button type="button" className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`} title={liveBadgeTitle} onClick={() => openSettings('about')}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</button></div></header>
         {traceTabs.length > 0 && <div className="workspace-tabs" role="tablist" aria-label={t('app.tabs.views')} onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));

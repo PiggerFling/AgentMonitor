@@ -7,4 +7,11 @@ export const ui = {
   dropdown: {
     select: 'Select',
   },
+  numberFormat: {
+    label: 'Number format',
+    compact: 'Compact (K/M)',
+    full: 'Full',
+    compactShort: 'K/M',
+    fullShort: '1,234',
+  },
 };

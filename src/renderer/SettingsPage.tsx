@@ -12,6 +12,8 @@ import { remoteIndicatorState, remoteStatusTitle, type RemoteIndicatorState } fr
 import { defaultTraceDir, formatSshArgs, sameTraceForm, TOOL_LABELS, traceFormFromOptions, traceOptionsFromForm, type TraceFormResult, type TraceSourceForm } from './serverForm';
 import { TraceSourceFields } from './TraceSourceFields';
 import { AddServerDialog, EditServerDialog } from './ServerDialog';
+import { Segmented } from './Segmented';
+import { NUMBER_FORMATS, useNumberFormat } from './numberFormat';
 import './Settings.css';
 
 export type MonitorMode = 'loading' | 'live' | 'offline';
@@ -109,29 +111,19 @@ function SettingRow({ label, hint, children }: { label: string; hint?: string; c
   return <div className="setting-row"><div className="setting-row__text"><span className="setting-row__label">{label}</span>{hint && <span className="setting-row__hint">{hint}</span>}</div><div className="setting-row__control">{children}</div></div>;
 }
 
-function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
-  return <div className="segmented" role="radiogroup" aria-label={label} onKeyDown={(event) => {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-    event.preventDefault();
-    const index = options.findIndex((option) => option.value === value);
-    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-    const next = options[(index + step + options.length) % options.length];
-    onChange(next.value);
-    (event.currentTarget.querySelector(`[data-value="${CSS.escape(next.value)}"]`) as HTMLElement | null)?.focus();
-  }}>
-    {options.map((option) => <button key={option.value} type="button" role="radio" data-value={option.value} aria-checked={option.value === value} tabIndex={option.value === value ? 0 : -1} className="segmented__option" onClick={() => onChange(option.value)}>{option.label}</button>)}
-  </div>;
-}
-
 function GeneralSection() {
   const { t, locale, setLocale } = useI18n();
   const [theme, setTheme] = useState<Theme>(readTheme);
+  const { format, setFormat } = useNumberFormat();
   return <section className="settings-card">
     <SettingRow label={t('settings.general.theme')} hint={t('settings.general.themeHint')}>
       <Segmented label={t('settings.general.theme')} value={theme} options={THEMES.map((option) => ({ value: option.id, label: t(option.labelKey) }))} onChange={(next) => { setTheme(next); saveTheme(next); }} />
     </SettingRow>
     <SettingRow label={t('settings.general.language')} hint={t('settings.general.languageHint')}>
       <Segmented<Locale> label={t('settings.general.language')} value={locale} options={LOCALES.map((option) => ({ value: option.id, label: option.label }))} onChange={setLocale} />
+    </SettingRow>
+    <SettingRow label={t('ui.numberFormat.label')} hint={t('settings.general.numberFormatHint')}>
+      <Segmented label={t('ui.numberFormat.label')} value={format} options={NUMBER_FORMATS.map((option) => ({ value: option.id, label: t(option.labelKey) }))} onChange={setFormat} />
     </SettingRow>
   </section>;
 }

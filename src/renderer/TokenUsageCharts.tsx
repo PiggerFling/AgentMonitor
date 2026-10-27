@@ -1,10 +1,8 @@
 import { useMemo } from 'react';
 import type { Agent } from '../shared/types';
 import { formatNumber, t, useI18n } from './i18n';
+import { useNumberFormat } from './numberFormat';
 import './TokenUsageCharts.css';
-
-// Uppercase so a million never reads as minutes (some locales print "2.5m").
-const compact = (n:number) => formatNumber(n,{notation:'compact',maximumFractionDigits:1}).toUpperCase();
 
 type TickAnchor = 'start'|'middle'|'end';
 type ChartPoint = {timestamp:number;input:number;output:number;cumulative:number};
@@ -18,7 +16,7 @@ function niceCeil(value:number) {
   return step*power;
 }
 
-function Axes({max,yTitle,xTicks}:{max:number;yTitle:string;xTicks:{at:number;label:string;anchor:TickAnchor}[]}) {
+function Axes({max,yTitle,xTicks,count}:{max:number;yTitle:string;xTicks:{at:number;label:string;anchor:TickAnchor}[];count:(value:number)=>string}) {
   const yTicks=[0,0.5,1];
   const middle=(PLOT.top+PLOT.bottom)/2;
   return <g className="token-chart__axes">
@@ -26,7 +24,7 @@ function Axes({max,yTitle,xTicks}:{max:number;yTitle:string;xTicks:{at:number;la
       const at=PLOT.bottom-fraction*(PLOT.bottom-PLOT.top);
       return <g key={fraction}>
         {fraction>0&&<line className="token-chart__grid" x1={PLOT.left} x2={PLOT.right} y1={at} y2={at}/>}
-        <text className="token-chart__tick" x={PLOT.left-8} y={at} textAnchor="end" dominantBaseline="middle">{compact(max*fraction)}</text>
+        <text className="token-chart__tick" x={PLOT.left-8} y={at} textAnchor="end" dominantBaseline="middle">{count(max*fraction)}</text>
       </g>;
     })}
     <path className="token-chart__axis" d={`M${PLOT.left} ${PLOT.top}V${PLOT.bottom}H${PLOT.right}`}/>
@@ -40,6 +38,7 @@ function Axes({max,yTitle,xTicks}:{max:number;yTitle:string;xTicks:{at:number;la
 }
 export function TokenUsageCharts({agents}:{agents:Agent[]}) {
   const {locale}=useI18n();
+  const {count,title}=useNumberFormat();
   const data = useMemo(() => {
     const bins = new Map<number,{input:number;output:number}>();
     for (const agent of agents) for (const point of agent.tokenTimeline ?? []) {
@@ -82,21 +81,21 @@ export function TokenUsageCharts({agents}:{agents:Agent[]}) {
     ?[{at:PLOT.left,label:tickTime(data.start),anchor:'start'},{at:(PLOT.left+PLOT.right)/2,label:tickTime((data.start+lastTime)/2),anchor:'middle'},{at:PLOT.right,label:tickTime(lastTime),anchor:'end'}]
     :[{at:PLOT.left,label:tickTime(data.start),anchor:'start'}];
   return <section className="token-charts" aria-label={t('tokens.charts.ariaCharts')}>
-    <div className="token-charts__stats"><span>{t('tokens.charts.average')} <strong>{t('tokens.charts.perMin',{value:compact(data.total/data.minutes)})}</strong></span><span>{t('tokens.charts.peakMinute')} <strong>{compact(data.peak)}</strong></span><span>{t('tokens.charts.recorded')} <strong>{t('tokens.charts.tokensCount',{value:compact(data.total)})}</strong></span></div>
+    <div className="token-charts__stats"><span>{t('tokens.charts.average')} <strong>{t('tokens.charts.perMin',{value:count(data.total/data.minutes)})}</strong></span><span>{t('tokens.charts.peakMinute')} <strong title={title(data.peak)}>{count(data.peak)}</strong></span><span>{t('tokens.charts.recorded')} <strong title={title(data.total)}>{t('tokens.charts.tokensCount',{value:count(data.total)})}</strong></span></div>
     <div className="token-charts__grid">
       <figure><figcaption>{t('tokens.charts.usageRate')} <small>{t('tokens.charts.rateUnit',{buckets:data.step>1?t('tokens.charts.averages',{step:data.step}):t('tokens.charts.oneMinuteBuckets')})}</small></figcaption>
         <div className="token-charts__legend"><span>{t('tokens.charts.legendInput')}</span><span>{t('tokens.charts.legendOutput')}</span><span>{t('tokens.charts.legendTotalDots')}</span></div>
         <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} role="img" aria-label={t('tokens.charts.rateAria',{peak:formatNumber(data.peak)})}>
-          <Axes max={maxRate} yTitle={t('tokens.charts.yRate')} xTicks={xTicks}/>
+          <Axes max={maxRate} yTitle={t('tokens.charts.yRate')} xTicks={xTicks} count={count}/>
           <path className="token-chart__input" d={line(p=>p.input,maxRate)}/><path className="token-chart__output" d={line(p=>p.output,maxRate)}/>
-          {data.points.map((p,i)=><circle key={p.timestamp} className="token-chart__point" cx={x(i)} cy={y(p.input+p.output,maxRate)} r="2"><title>{t('tokens.charts.pointRate',{time:range(p.timestamp),input:formatNumber(Math.round(p.input)),output:formatNumber(Math.round(p.output))})}</title></circle>)}
+          {data.points.map((p,i)=><circle key={p.timestamp} className="token-chart__point" cx={x(i)} cy={y(p.input+p.output,maxRate)} r="2"><title>{t('tokens.charts.pointRate',{time:range(p.timestamp),input:count(Math.round(p.input)),output:count(Math.round(p.output))})}</title></circle>)}
         </svg>
       </figure>
       <figure><figcaption>{t('tokens.charts.cumulative')} <small>{t('tokens.charts.recordedInterval')}</small></figcaption>
         <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} role="img" aria-label={t('tokens.charts.cumulativeAria',{total:formatNumber(data.total)})}>
-          <Axes max={maxTotal} yTitle={t('tokens.charts.yCumulative')} xTicks={xTicks}/>
+          <Axes max={maxTotal} yTitle={t('tokens.charts.yCumulative')} xTicks={xTicks} count={count}/>
           <path className="token-chart__input" d={line(p=>p.cumulative,maxTotal)}/>
-          {data.points.map((p,i)=><circle key={p.timestamp} className="token-chart__point" cx={x(i)} cy={y(p.cumulative,maxTotal)} r="2"><title>{t('tokens.charts.pointCumulative',{time:range(p.timestamp),total:formatNumber(p.cumulative)})}</title></circle>)}
+          {data.points.map((p,i)=><circle key={p.timestamp} className="token-chart__point" cx={x(i)} cy={y(p.cumulative,maxTotal)} r="2"><title>{t('tokens.charts.pointCumulative',{time:range(p.timestamp),total:count(p.cumulative)})}</title></circle>)}
         </svg>
       </figure>
     </div>

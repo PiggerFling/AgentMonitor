@@ -13,11 +13,12 @@ export const settings = {
   },
   needsDesktop: 'Available in the desktop app. This browser page is not connected to Agent Monitor.',
   general: {
-    description: 'How Agent Monitor looks.',
+    description: 'How Agent Monitor looks and shows numbers.',
     theme: 'Theme',
     themeHint: 'Colors of the whole window.',
     language: 'Language',
     languageHint: 'Language of the interface.',
+    numberFormatHint: 'How token counts are shown, for example 97.6M or 97,574,015.',
   },
   local: {
     description: 'Which tools Agent Monitor watches on this computer, and where their data lives.',

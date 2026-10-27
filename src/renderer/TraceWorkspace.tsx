@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode
 import { ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Home } from 'lucide-react';
 import type { Agent, AgentHarness, TraceEntry } from '../shared/types';
 import { formatNumber, t, useI18n, type MessageKey } from './i18n';
+import { useNumberFormat } from './numberFormat';
 import { Dropdown } from './Dropdown';
 import { Markdown } from './Markdown';
 import {
@@ -388,6 +389,7 @@ function TraceHeader({ agent, titleId, itemCount, subagents, parent, loading, on
 
 function ConversationCard({ group, openDisclosure, onToggle }: { group: ConversationGroup } & DisclosureProps) {
   const { t } = useI18n();
+  const { count } = useNumberFormat();
   const usage = conversationUsage(group);
   const duration = conversationDuration(group);
   const iso = isoFor(group.timestamp);
@@ -402,7 +404,7 @@ function ConversationCard({ group, openDisclosure, onToggle }: { group: Conversa
         <span className="trace-card__stats">
           {usage && group.kind !== 'usage' && (
             <span title={t('trace.card.usageTitle', { input: formatNumber(usage.input), output: formatNumber(usage.output) })}>
-              {formatNumber(usage.input)}↓ {formatNumber(usage.output)}↑
+              {count(usage.input)}↓ {count(usage.output)}↑
             </span>
           )}
           {duration !== undefined && <span title={t('trace.card.durationTitle')}>{formatNumber(Math.round(duration))} ms</span>}

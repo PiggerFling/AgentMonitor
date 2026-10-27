@@ -20,6 +20,13 @@ export const zhCN: Messages = {
     dropdown: {
       select: '选择',
     },
+    numberFormat: {
+      label: '数字格式',
+      compact: '紧凑（K/M）',
+      full: '完整',
+      compactShort: 'K/M',
+      fullShort: '1,234',
+    },
   },
   app: {
     providers: {
@@ -131,6 +138,13 @@ export const zhCN: Messages = {
       overview: '概览',
       topology: '智能体拓扑',
       recentRuns: '最近运行',
+      range: {
+        label: '显示在此期间有活动的运行',
+        day: { short: '1天', title: '最近 1 天', empty: '最近 1 天没有运行' },
+        week: { short: '7天', title: '最近 7 天', empty: '最近 7 天没有运行' },
+        month: { short: '30天', title: '最近 30 天', empty: '最近 30 天没有运行' },
+        all: { short: '全部', title: '全部运行', empty: '暂无运行' },
+      },
       noRuns: '尚未发现运行。',
       agentCount: {
         other: '{count} 个智能体',
@@ -326,6 +340,7 @@ export const zhCN: Messages = {
     estimateUsd: 'API Token 估算（USD）',
     estimateNote: 'API Token 估算 · 费率核验于 {date} · 未指定时按标准层级计算 · 非订阅账单',
     excludes: '不含 {tokens} 个费率未知或用量元数据不完整的 Token',
+    excludesShort: '不含 {tokens} 个未计价 Token',
     groupBy: '用量分组方式',
     byAgent: '按智能体',
     byModel: '按模型',
@@ -443,6 +458,14 @@ export const zhCN: Messages = {
       sourcesHint: '目录留空表示使用该工具的默认目录。',
       installNote: '添加时会将 Agent 程序（约 600 KB）上传到服务器的 ~/.agent-monitor。服务器上不会有常驻进程：Agent 程序仅在本应用连接期间运行。',
       submit: '添加服务器',
+      progress: {
+        probe: '正在检查服务器…',
+        install: '正在上传 Agent 程序…',
+        save: '正在保存…',
+      },
+      success: '部署成功',
+      successBody: '{label} 已设置完成，连接后其运行会显示在侧边栏中。',
+      done: '完成',
       save: '保存',
       saving: '正在保存…',
       saveFailed: '无法保存服务器：{error}',
@@ -498,11 +521,12 @@ export const zhCN: Messages = {
     },
     needsDesktop: '仅在桌面应用中可用。此浏览器页面未连接到 Agent Monitor。',
     general: {
-      description: 'Agent Monitor 的外观。',
+      description: 'Agent Monitor 的外观与数字显示方式。',
       theme: '主题',
       themeHint: '整个窗口的配色。',
       language: '语言',
       languageHint: '界面语言。',
+      numberFormatHint: 'Token 数量的显示方式，例如 97.6M 或 97,574,015。',
     },
     local: {
       description: 'Agent Monitor 在这台电脑上监视哪些工具，以及它们的数据位置。',

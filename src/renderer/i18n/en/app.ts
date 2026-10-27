@@ -109,6 +109,13 @@ export const app = {
     overview: 'Overview',
     topology: 'Agent topology',
     recentRuns: 'Recent runs',
+    range: {
+      label: 'Show runs active within',
+      day: { short: '1d', title: 'Last day', empty: 'No runs in the last day' },
+      week: { short: '7d', title: 'Last 7 days', empty: 'No runs in the last 7 days' },
+      month: { short: '30d', title: 'Last 30 days', empty: 'No runs in the last 30 days' },
+      all: { short: 'All', title: 'All runs', empty: 'No runs yet' },
+    },
     noRuns: 'No runs discovered yet.',
     agentCount: {
       one: '{count} agent',

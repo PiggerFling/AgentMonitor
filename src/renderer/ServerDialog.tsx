@@ -6,6 +6,7 @@ import type { AddServerResult, MonitorBridge, ProbeServerResult, ServerInfo, Ser
 import { useI18n, type MessageKey } from './i18n';
 import { customProbeDirs, defaultTraceDir, filterSshHosts, formatSshArgs, parseSshArgs, traceFormFromOptions, traceFormFromProbe, traceOptionsFromForm, type TraceFormResult, type TraceSourceForm } from './serverForm';
 import { TraceSourceFields } from './TraceSourceFields';
+import { useDialogFocus } from './useDialogFocus';
 
 type Failure = Extract<AddServerResult, { ok: false }>;
 type ProbeOk = Extract<ProbeServerResult, { ok: true }>;
@@ -82,59 +83,44 @@ function SetupFailure({ failure, host, platform, onRetry }: { failure: Failure; 
   </div>;
 }
 
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])';
-
-/** A modal dialog: keeps focus inside, closes on Escape unless `onClose` is omitted (e.g. while busy). */
-export function Modal({ title, onClose, children, footer, wide = false }: { title: ReactNode; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+/**
+ * A modal dialog: keeps focus inside, closes on Escape unless `onClose` is omitted (e.g. while busy).
+ * `fixed` gives it a constant height so content changes scroll inside instead of resizing the dialog.
+ */
+export function Modal({ title, onClose, children, footer, wide = false, fixed = false, bodyClassName }: {
+  title: ReactNode; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; fixed?: boolean; bodyClassName?: string;
+}) {
   const { t } = useI18n();
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const first = panel.current?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.current;
-    first?.focus({ preventScroll: true });
-    // On the document so Escape and Tab still work after the focused control unmounts (e.g. when a step finishes).
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      const root = panel.current;
-      if (!root) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeRef.current?.();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => element.offsetParent !== null);
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (!root.contains(active)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
-      else if (event.shiftKey && (active === first || active === root)) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      previous?.focus?.({ preventScroll: true });
-    };
-  }, []);
+  useDialogFocus(panel, onClose);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
-    <div ref={panel} className={`modal${wide ? ' modal--wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1}>
+    <div ref={panel} className={`modal${wide ? ' modal--wide' : ''}${fixed ? ' modal--fixed' : ''}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1}>
       <header className="modal__head">
         <h2 id={`${id}-title`}>{title}</h2>
         <button type="button" className="icon-button" aria-label={t('servers.close')} title={t('servers.close')} disabled={!onClose} onClick={onClose}><X size={16} aria-hidden="true" /></button>
       </header>
-      <div className="modal__body">{children}</div>
+      <div className={`modal__body${bodyClassName ? ` ${bodyClassName}` : ''}`}>{children}</div>
       {footer && <footer className="modal__foot">{footer}</footer>}
     </div>
   </div>;
 }
 
 type Probe = { state: 'running' } | { state: 'ok'; result: ProbeOk } | { state: 'failed'; failure: Failure };
-type Submit = { state: 'idle' } | { state: 'running'; steps: Partial<Record<ServerSetupStep, StepState>> } | { state: 'failed'; steps: Partial<Record<ServerSetupStep, StepState>>; failure: Failure };
+type Submit = { state: 'idle' } | { state: 'running'; steps: Partial<Record<ServerSetupStep, StepState>> } | { state: 'failed'; steps: Partial<Record<ServerSetupStep, StepState>>; failure: Failure } | { state: 'done'; label: string };
+
+/** The step the add button reports: the latest one in progress, else the first not yet done. */
+function currentStep(steps: Partial<Record<ServerSetupStep, StepState>>): ServerSetupStep {
+  return [...STEPS].reverse().find((step) => steps[step] === 'running') ?? STEPS.find((step) => steps[step] !== 'done') ?? 'save';
+}
+
+/** Animated check mark shown once a server is deployed; the stroke draws in unless reduced motion is preferred. */
+function SuccessCheck() {
+  return <svg className="deploy-success__check" viewBox="0 0 52 52" aria-hidden="true">
+    <circle className="deploy-success__ring" cx="26" cy="26" r="23" />
+    <path className="deploy-success__tick" d="M15 27l7.5 7.5L37.5 19" />
+  </svg>;
+}
 
 function placeholdersFor(home?: string): Record<TraceTool, string> {
   return Object.fromEntries(TRACE_TOOLS.map((tool) => [tool, defaultTraceDir(tool, home)])) as Record<TraceTool, string>;
@@ -253,9 +239,9 @@ export function AddServerDialog({ bridge, onClose, onAdded }: { bridge: MonitorB
       result = await bridge.addServer({ alias: host.alias, ...(label.trim() ? { label: label.trim() } : {}), ...(args.length ? { sshArgs: args } : {}), ...checked.options, ...(accept ? { acceptNewHostKey: true } : {}) });
     } catch (error) { result = { ok: false, code: 'failed', message: errorMessage(error) }; }
     submitAlias.current = undefined;
-    if (result.ok) { onAdded(result.serverId); onClose(); return; }
+    if (result.ok) { onAdded(result.serverId); setSubmit({ state: 'done', label: label.trim() || host.alias }); return; }
     const failure = result;
-    setSubmit((current) => ({ state: 'failed', steps: current.state === 'idle' ? {} : current.steps, failure }));
+    setSubmit((current) => ({ state: 'failed', steps: 'steps' in current ? current.steps : {}, failure }));
   }
 
   const view = useMemo(() => filterSshHosts(hosts ?? [], query, showAll), [hosts, query, showAll]);
@@ -267,7 +253,10 @@ export function AddServerDialog({ bridge, onClose, onAdded }: { bridge: MonitorB
   }, [probeResult, t]);
 
   if (!host) {
-    return <Modal key="pick" title={t('servers.dialog.addTitle')} onClose={onClose} wide>
+    const forgeToggle = hosts?.length && view.forgeHosts > 0
+      ? <button type="button" className="link-button" onClick={() => setShowAll((value) => !value)}>{showAll ? t('servers.dialog.hideForge') : t('servers.dialog.showForge', { count: view.hiddenForgeHosts })}</button>
+      : undefined;
+    return <Modal key="pick" title={t('servers.dialog.addTitle')} onClose={onClose} wide fixed bodyClassName="modal__body--picker" footer={forgeToggle}>
       <p className="modal__lead">{t('servers.dialog.pickHost')}</p>
       <div className="host-search">
         <Search size={14} aria-hidden="true" />
@@ -278,25 +267,37 @@ export function AddServerDialog({ bridge, onClose, onAdded }: { bridge: MonitorB
       {hostsError ? <p className="settings-message settings-message--error" role="alert">{t('servers.dialog.hostsFailed', { error: hostsError })}</p>
         : !hosts ? <p className="settings-message"><LoaderCircle size={14} className="spin" aria-hidden="true" />{t('servers.dialog.hostsLoading')}</p>
           : !hosts.length ? <p className="settings-message">{t('servers.dialog.hostsEmpty')}</p>
-            : <>
-              {view.hosts.length ? <ul className="host-list">{view.hosts.map((item) => <li key={item.alias}>
+            : view.hosts.length ? <ul className="host-list">{view.hosts.map((item) => <li key={item.alias}>
                 <button type="button" className="host-option" disabled={Boolean(item.serverId)} onClick={() => choose(item)}>
                   <span className="host-option__text"><span className="host-option__alias">{item.alias}</span><span className="host-option__hint">{hostHint(item)}</span></span>
                   {item.serverId ? <span className="host-option__added"><Check size={12} aria-hidden="true" />{t('servers.dialog.added')}</span> : <ChevronRight size={15} aria-hidden="true" className="host-option__go" />}
                 </button>
               </li>)}</ul> : <p className="settings-message">{query.trim() ? t('servers.dialog.noMatch', { query: query.trim() }) : t('servers.dialog.hostsEmpty')}</p>}
-              {view.forgeHosts > 0 && <button type="button" className="link-button" onClick={() => setShowAll((value) => !value)}>{showAll ? t('servers.dialog.hideForge') : t('servers.dialog.showForge', { count: view.hiddenForgeHosts })}</button>}
-            </>}
+    </Modal>;
+  }
+
+  if (submit.state === 'done') {
+    return <Modal key="done" title={t('servers.dialog.addTitle')} onClose={onClose} wide fixed bodyClassName="modal__body--center" footer={<>
+      <span className="modal__spacer" />
+      <button type="button" className="button button--primary button--small" onClick={onClose} data-autofocus>{t('servers.dialog.done')}</button>
+    </>}>
+      <div className="deploy-success" role="status">
+        <SuccessCheck />
+        <p className="deploy-success__title">{t('servers.dialog.success')}</p>
+        <p className="deploy-success__body">{t('servers.dialog.successBody', { label: submit.label })}</p>
+      </div>
     </Modal>;
   }
 
   const disabled = busy;
   const failure = submit.state === 'failed' ? submit.failure : undefined;
-  return <Modal key="form" title={t('servers.dialog.addTitle')} onClose={busy ? undefined : onClose} wide footer={<>
+  return <Modal key="form" title={t('servers.dialog.addTitle')} onClose={busy ? undefined : onClose} wide fixed footer={<>
     <button type="button" className="button button--small" disabled={busy} onClick={back}><ArrowLeft size={13} aria-hidden="true" />{t('servers.dialog.back')}</button>
     <span className="modal__spacer" />
     <button type="button" className="button button--small" disabled={busy} onClick={onClose}>{t('servers.cancel')}</button>
-    <button type="button" className="button button--primary button--small" disabled={busy || probe?.state !== 'ok'} onClick={() => void add()}>{busy && <LoaderCircle size={12} className="spin" aria-hidden="true" />}{t('servers.dialog.submit')}</button>
+    <button type="button" className="button button--primary button--small" disabled={busy || probe?.state !== 'ok'} aria-busy={busy} aria-live="polite" onClick={() => void add()}>{busy
+      ? <><LoaderCircle size={12} className="spin" aria-hidden="true" />{t(`servers.dialog.progress.${currentStep(submit.steps)}`)}</>
+      : t('servers.dialog.submit')}</button>
   </>}>
     <div className="probe-card">
       <div className="probe-card__host"><span className="probe-card__alias">{host.alias}</span><span className="probe-card__hint">{hostHint(host)}</span></div>

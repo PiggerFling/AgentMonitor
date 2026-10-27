@@ -3,6 +3,8 @@
 
 Use the **Theme** selector in the top bar to choose **Green** (default), **Charcoal**, or **Light**. The choice is saved locally and restored on the next launch. Sidebar rows and section titles use text without decorative icons. Theme, provider, and run pickers use custom keyboard-accessible menus.
 
+The **1d / 7d / 30d / All** control next to **Recent runs** limits the sidebar and the run picker to runs with activity in that period (one day by default, remembered across launches). Runs with a working agent and the selected run always stay listed. Token counts are shown as **K / M / B** by default; choose **Full** under **Settings → General → Number format** (or with the toggle in the token breakdown) for exact digits. Hovering a compact count shows the exact value.
+
 Use **Expand trace** or **Open trace in tab** in the details panel to read entries across the full window. Trace tabs use conversation cards with collapsible thinking and tool groups. Tool inputs and results are paired by their call IDs, including interleaved results; unmatched outputs remain visible. Search and event-kind filters keep matching conversation context together. Consecutive cumulative thinking summaries collapse into one block with an update count. Refresh reloads the recent entries, and the Graph tab returns to the canvas.
 
 ## Token usage and cost estimates

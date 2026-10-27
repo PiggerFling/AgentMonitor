@@ -1,4 +1,5 @@
 import type { TraceEntry } from '../shared/types';
+import { t } from './i18n';
 
 /** Optional provider metadata carried by normalized entries. */
 export type TraceEntryDetails = TraceEntry & {
@@ -247,7 +248,7 @@ export function groupTraceEntries(entries: readonly TraceEntryDetails[]): Conver
 function blockText(block: ConversationBlock) {
   if (block.type === 'tools') {
     return block.tools.flatMap(({ call, result }) => [
-      TRACE_KIND_LABEL.call,
+      t('trace.kind.tool-call'),
       call.toolName ?? '',
       call.text,
       result?.text ?? '',
@@ -255,10 +256,6 @@ function blockText(block: ConversationBlock) {
   }
   return block.entry.text;
 }
-
-const TRACE_KIND_LABEL = {
-  call: 'Tool call',
-};
 
 /** Search text for a complete card, including paired tool input and result. */
 export function conversationSearchText(group: ConversationGroup) {

@@ -1,27 +1,29 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { formatNumber, useI18n } from './i18n';
 import './RollingNumber.css';
 
-const DECIMAL = (1.5).toLocaleString().charAt(1);
-
 /** Maps each character to its place relative to the decimal separator (or the end when there is none). */
-function places(text: string) {
-  const point = text.indexOf(DECIMAL);
+function places(text: string, decimal: string) {
+  const point = text.indexOf(decimal);
   const anchor = point === -1 ? text.length : point;
   return [...text].map((char, index) => ({ char, place: anchor - index }));
 }
 
 /** One accessible number; changed digits spin a reel on real counter updates. */
 export function RollingNumber({ value }: { value: number }) {
-  return <RollingText text={Math.max(0, Math.round(value)).toLocaleString()} />;
+  const { locale } = useI18n();
+  return <RollingText text={formatNumber(Math.max(0, Math.round(value)), undefined, locale)} />;
 }
 
 /** Formatted numeric text (e.g. "$1.2345"); digits aligned by decimal place spin when they change. */
 export function RollingText({ text }: { text: string }) {
+  const { locale } = useI18n();
+  const decimal = formatNumber(1.5, undefined, locale).charAt(1);
   const previous = useRef(text);
-  const old = useMemo(() => new Map(places(previous.current).map(({ char, place }) => [place, char])), [text]);
+  const old = useMemo(() => new Map(places(previous.current, decimal).map(({ char, place }) => [place, char])), [text]);
   useEffect(() => { previous.current = text; }, [text]);
   return <span className="rolling-number" aria-label={text}>
-    <span aria-hidden="true">{places(text).map(({ char, place }) => {
+    <span aria-hidden="true">{places(text, decimal).map(({ char, place }) => {
       const from = old.get(place);
       const changed = /\d/.test(char) && /\d/.test(from || '') && from !== char;
       const steps = changed ? 10 + (Number(char) - Number(from) + 10) % 10 : 0;

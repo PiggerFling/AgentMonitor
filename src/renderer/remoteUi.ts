@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { Agent, AgentRun, RemoteHostStatus } from '../shared/types';
 
 /**
@@ -19,7 +20,7 @@ export interface HostOption { value: HostFilter; label: string }
 export function buildHostOptions(remotes: readonly RemoteHostStatus[] | undefined): HostOption[] {
   if (!remotes?.length) return [];
   const seen = new Set<string>();
-  const options: HostOption[] = [{ value: HOST_ALL, label: 'All hosts' }, { value: HOST_LOCAL, label: 'Local' }];
+  const options: HostOption[] = [{ value: HOST_ALL, label: t('remote.allHosts') }, { value: HOST_LOCAL, label: t('remote.local') }];
   for (const remote of remotes) {
     if (seen.has(remote.label)) continue;
     seen.add(remote.label);
@@ -56,7 +57,7 @@ export function filterAgentsByHost<T extends Pick<Agent, 'runId'>>(agents: reado
 /** Host tag text for a run: nothing when only the local machine is monitored, otherwise the host or "local". */
 export function runHostLabel(run: Pick<AgentRun, 'host'>, remotesConfigured: boolean): string | undefined {
   if (run.host) return run.host;
-  return remotesConfigured ? 'local' : undefined;
+  return remotesConfigured ? t('remote.localTag') : undefined;
 }
 
 export interface MonitorHealth {
@@ -102,7 +103,7 @@ export function assessMonitorHealth({ errors, remotes, watching }: { errors: rea
         ...localErrors,
         ...remoteErrorList,
         ...list.filter((remote) => remote.state === 'error' && !remoteErrors[remote.id].length)
-          .map((remote) => `[${remote.label}] ${remote.error ?? 'connection error'}`),
+          .map((remote) => `[${remote.label}] ${remote.error ?? t('remote.connectionError')}`),
       ]
       : localErrors,
     warning: localErrors.length > 0 || escalate,
@@ -126,9 +127,9 @@ export function remoteStatusTitle(remote: RemoteHostStatus, errors: readonly str
   const detail = remote.error ?? stripped[0];
   const extra = stripped.filter((error) => error !== detail);
   const lines: string[] = [];
-  if (remote.state === 'connected') lines.push(`${remote.label}: connected`);
-  else if (remote.state === 'connecting') lines.push(`${remote.label}: connecting…`);
-  else lines.push(`${remote.label}: ${detail ?? 'connection error'}`);
+  if (remote.state === 'connected') lines.push(t('remote.connected', { label: remote.label }));
+  else if (remote.state === 'connecting') lines.push(t('remote.connecting', { label: remote.label }));
+  else lines.push(`${remote.label}: ${detail ?? t('remote.connectionError')}`);
   if (remote.state !== 'error' && detail) lines.push(detail);
   lines.push(...extra);
   return lines.join('\n');

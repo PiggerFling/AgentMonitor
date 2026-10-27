@@ -1,8 +1,10 @@
+import type { MessageKey } from './i18n';
+
 export const THEMES = [
-  { id: 'green', label: 'Green' },
-  { id: 'charcoal', label: 'Charcoal' },
-  { id: 'light', label: 'Light' },
-] as const;
+  { id: 'green', labelKey: 'ui.theme.green' },
+  { id: 'charcoal', labelKey: 'ui.theme.charcoal' },
+  { id: 'light', labelKey: 'ui.theme.light' },
+] as const satisfies readonly { id: string; labelKey: MessageKey }[];
 
 export type Theme = typeof THEMES[number]['id'];
 const STORAGE_KEY = 'agent-monitor.theme';

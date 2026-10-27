@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
+import { useI18n } from './i18n';
 
 export interface DropdownOption {
   value: string;
@@ -8,7 +9,7 @@ export interface DropdownOption {
   description?: string;
 }
 
-export function Dropdown({ label, value, options, onChange, placeholder = 'Select', wide = false }: {
+export function Dropdown({ label, value, options, onChange, placeholder, wide = false }: {
   label: string;
   value: string;
   options: DropdownOption[];
@@ -16,6 +17,8 @@ export function Dropdown({ label, value, options, onChange, placeholder = 'Selec
   placeholder?: string;
   wide?: boolean;
 }) {
+  const { t } = useI18n();
+  const shownPlaceholder = placeholder ?? t('ui.dropdown.select');
   const id = useId();
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -86,14 +89,14 @@ export function Dropdown({ label, value, options, onChange, placeholder = 'Selec
   return (
     <div className={`dropdown${wide ? ' dropdown--wide' : ''}`} ref={wrapper}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      <button ref={trigger} type="button" className="dropdown__trigger" aria-label={`${label}: ${selected?.label ?? placeholder}`}
+      <button ref={trigger} type="button" className="dropdown__trigger" aria-label={`${label}: ${selected?.label ?? shownPlaceholder}`}
         aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? `${id}-menu` : undefined}
         disabled={!options.length} onClick={() => open ? close() : show()}
         onKeyDown={event => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); show(event.key === 'ArrowUp'); }
         }}>
         <span className="dropdown__label">{label}</span>
-        <span className="dropdown__value">{selected?.label ?? placeholder}</span>
+        <span className="dropdown__value">{selected?.label ?? shownPlaceholder}</span>
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {open && <div ref={menu} id={`${id}-menu`} className="dropdown__menu" role="listbox" aria-label={label}

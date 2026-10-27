@@ -2,39 +2,41 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Info, TriangleAlert, X } from 'lucide-react';
 import type { Agent } from '../shared/types';
 import { estimateAgentCost, estimateModelCosts, PRICING_VERIFIED_AT, UNATTRIBUTED_MODEL, type ModelCostRow } from '../shared/pricing';
+import { formatNumber, formatUsd, t, useI18n } from './i18n';
 import { RollingNumber, RollingText } from './RollingNumber';
 import { TokenUsageCharts } from './TokenUsageCharts';
 
-const exact = (value: number) => value.toLocaleString();
+const exact = (value: number) => formatNumber(value);
 
 function usd(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return 'Unknown';
+  if (value === null || !Number.isFinite(value)) return t('tokens.unknown');
   if (value !== 0 && Math.abs(value) < 0.0001) return '<$0.0001';
-  return `$${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+  return formatUsd(value, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 function share(part: number, whole: number) {
   if (!whole) return '0%';
   const percent = part / whole * 100;
-  return `${percent > 0 && percent < 0.1 ? '<0.1' : percent.toFixed(1)}%`;
+  return `${percent > 0 && percent < 0.1 ? '<0.1' : formatNumber(percent, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 }
 
-const rate = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+const rate = (value: number) => formatUsd(value, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 /** Cents are enough for the header; the breakdown keeps full precision. */
 function usdShort(value: number) {
   if (Math.abs(value) < 1) return usd(value);
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatUsd(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function modelCostLabel(row: ModelCostRow) {
   if (row.complete) return usd(row.knownUsd);
-  return row.knownUsd > 0 ? usd(row.knownUsd) : 'Unknown';
+  return row.knownUsd > 0 ? usd(row.knownUsd) : t('tokens.unknown');
 }
 
 function modelCostNote(row: ModelCostRow) {
-  if (row.complete) return `Rates verified ${PRICING_VERIFIED_AT}.`;
-  const prefix = row.knownUsd > 0 ? `Known subtotal only; ${exact(row.unpricedTokens)} tokens unpriced.` : `${exact(row.unpricedTokens)} tokens unpriced.`;
+  if (row.complete) return t('tokens.ratesVerified', { date: PRICING_VERIFIED_AT });
+  const tokens = exact(row.unpricedTokens);
+  const prefix = row.knownUsd > 0 ? t('tokens.knownSubtotalUnpriced', { tokens }) : t('tokens.tokensUnpriced', { tokens });
   return [prefix, ...row.notes].join(' ');
 }
 
@@ -42,17 +44,18 @@ type AgentCost = ReturnType<typeof estimateAgentCost>;
 
 function costLabel(cost: AgentCost) {
   if (cost.complete && cost.usd !== null) return usd(cost.usd);
-  return cost.knownUsd > 0 ? usd(cost.knownUsd) : 'Unknown';
+  return cost.knownUsd > 0 ? usd(cost.knownUsd) : t('tokens.unknown');
 }
 
 function costNote(cost: AgentCost) {
   if (cost.notes.length) return cost.notes.join(' ');
   return cost.complete
-    ? `Rates verified ${PRICING_VERIFIED_AT}.`
-    : 'Known subtotal only; some model rates or cache token metadata are unavailable.';
+    ? t('tokens.ratesVerified', { date: PRICING_VERIFIED_AT })
+    : t('tokens.knownSubtotalMissing');
 }
 
 export function RunTokenDetails({ agents }: { agents: Agent[] }) {
+  useI18n();
   const ref = useRef<HTMLDetailsElement>(null);
   const [view, setView] = useState<'agent' | 'model'>('agent');
   const modelRows = useMemo(() => estimateModelCosts(agents), [agents]);
@@ -79,12 +82,12 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
     ? usd(totalCost.knownUsd)
     : totalCost.knownUsd > 0
       ? usd(totalCost.knownUsd)
-      : 'Unknown';
+      : t('tokens.unknown');
   const totalCostNote = totalCost.complete
-    ? `Rates verified ${PRICING_VERIFIED_AT}.`
+    ? t('tokens.ratesVerified', { date: PRICING_VERIFIED_AT })
     : totalCost.knownUsd > 0
-      ? `Known subtotal from priced usage. ${totalCost.unpricedTokens.toLocaleString()} tokens have no verified rate or complete cache metadata.`
-      : `No priced usage is available. ${totalCost.unpricedTokens.toLocaleString()} tokens have no verified rate or complete cache metadata.`;
+      ? t('tokens.knownSubtotalPriced', { tokens: exact(totalCost.unpricedTokens) })
+      : t('tokens.noPricedUsage', { tokens: exact(totalCost.unpricedTokens) });
 
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -106,89 +109,89 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
     <details className="run-token-details" ref={ref} onKeyDown={event => {
       if (event.key === 'Escape' && ref.current?.open) { event.preventDefault(); event.stopPropagation(); close(); }
     }}>
-      <summary className="run-token-totals" aria-label={`Run token totals: ${exact(totals.input)} input, ${exact(totals.output)} output, ${totalCostLabel} API token estimate. Show per-agent breakdown`}>
-        <span className="run-token-totals__stat run-token-totals__stat--input" title={`${exact(totals.input)} input tokens`}>
-          <span className="run-token-totals__label">Input</span>
+      <summary className="run-token-totals" aria-label={t('tokens.summaryLabel', { input: exact(totals.input), output: exact(totals.output), cost: totalCostLabel })}>
+        <span className="run-token-totals__stat run-token-totals__stat--input" title={t('tokens.inputTitle', { count: exact(totals.input) })}>
+          <span className="run-token-totals__label">{t('tokens.input')}</span>
           <strong><RollingNumber value={totals.input} /></strong>
         </span>
-        <span className="run-token-totals__stat run-token-totals__stat--output" title={`${exact(totals.output)} output tokens`}>
-          <span className="run-token-totals__label">Output</span>
+        <span className="run-token-totals__stat run-token-totals__stat--output" title={t('tokens.outputTitle', { count: exact(totals.output) })}>
+          <span className="run-token-totals__label">{t('tokens.output')}</span>
           <strong><RollingNumber value={totals.output} /></strong>
         </span>
-        <span className="run-token-totals__stat run-token-totals__stat--usd" title={`${totalCostLabel} API token estimate (USD). ${totalCostNote}`}>
-          <span className="run-token-totals__label">Est. cost</span>
+        <span className="run-token-totals__stat run-token-totals__stat--usd" title={t('tokens.costTitle', { cost: totalCostLabel, note: totalCostNote })}>
+          <span className="run-token-totals__label">{t('tokens.estCost')}</span>
           <strong><RollingText text={totalCost.knownUsd > 0 ? usdShort(totalCost.knownUsd) : totalCostLabel} /></strong>
         </span>
-        <span className="run-token-totals__details">Details<ChevronDown size={14} aria-hidden="true" /></span>
+        <span className="run-token-totals__details">{t('tokens.details')}<ChevronDown size={14} aria-hidden="true" /></span>
       </summary>
       <section className="token-breakdown" aria-labelledby={titleId}>
         <header>
           <div>
-            <h2 id={titleId}>Token breakdown</h2>
-            <p>Main agent and {agents.length - 1} {agents.length === 2 ? 'subagent' : 'subagents'} · {agents.length} agents total</p>
+            <h2 id={titleId}>{t('tokens.breakdown')}</h2>
+            <p>{t('tokens.agentSummary.subagents', { count: agents.length - 1, sub: agents.length - 1, total: agents.length })}</p>
           </div>
-          <button type="button" className="token-breakdown__close" onClick={close}><X size={15} aria-hidden="true" />Close</button>
+          <button type="button" className="token-breakdown__close" onClick={close}><X size={15} aria-hidden="true" />{t('tokens.close')}</button>
         </header>
-        <div className="token-breakdown__totals" aria-label="Aggregated run usage">
+        <div className="token-breakdown__totals" aria-label={t('tokens.aggregated')}>
           <div className="token-breakdown__tile token-breakdown__tile--input">
-            <span>Input tokens</span>
+            <span>{t('tokens.inputTokens')}</span>
             <strong><RollingNumber value={totals.input} /></strong>
-            <small>{share(totals.input, totalTokens)} of total · includes cache</small>
+            <small>{t('tokens.shareOfTotalCached', { share: share(totals.input, totalTokens) })}</small>
           </div>
           <div className="token-breakdown__tile token-breakdown__tile--output">
-            <span>Output tokens</span>
+            <span>{t('tokens.outputTokens')}</span>
             <strong><RollingNumber value={totals.output} /></strong>
-            <small>{share(totals.output, totalTokens)} of total</small>
+            <small>{t('tokens.shareOfTotal', { share: share(totals.output, totalTokens) })}</small>
           </div>
           <div className="token-breakdown__tile">
-            <span>Total tokens</span>
+            <span>{t('tokens.totalTokens')}</span>
             <strong><RollingNumber value={totalTokens} /></strong>
-            <small>Across {agents.length} {agents.length === 1 ? 'agent' : 'agents'}</small>
+            <small>{t('tokens.acrossAgents', { count: agents.length })}</small>
           </div>
-          <div className="token-breakdown__tile token-breakdown__tile--cost" title={`${totalCostLabel}. ${totalCostNote}`}>
-            <span>Estimated cost</span>
+          <div className="token-breakdown__tile token-breakdown__tile--cost" title={t('tokens.costTileTitle', { cost: totalCostLabel, note: totalCostNote })}>
+            <span>{t('tokens.estimatedCost')}</span>
             <strong><RollingText text={totalCost.knownUsd > 0 ? usdShort(totalCost.knownUsd) : totalCostLabel} /></strong>
-            <small>{perMillion ? `≈ ${usd(perMillion)} per 1M priced tokens` : 'API token estimate (USD)'}</small>
+            <small>{perMillion ? t('tokens.perMillion', { cost: usd(perMillion) }) : t('tokens.estimateUsd')}</small>
           </div>
         </div>
         <div className="token-breakdown__notes">
-          <span><Info size={13} aria-hidden="true" />API token estimate · rates verified {PRICING_VERIFIED_AT} · standard tier when unspecified · not a subscription bill</span>
-          {!totalCost.complete && <span className="token-breakdown__warning"><TriangleAlert size={13} aria-hidden="true" />Excludes {exact(totalCost.unpricedTokens)} tokens with unknown pricing or incomplete usage metadata</span>}
+          <span><Info size={13} aria-hidden="true" />{t('tokens.estimateNote', { date: PRICING_VERIFIED_AT })}</span>
+          {!totalCost.complete && <span className="token-breakdown__warning"><TriangleAlert size={13} aria-hidden="true" />{t('tokens.excludes', { tokens: exact(totalCost.unpricedTokens) })}</span>}
         </div>
         <div className="token-breakdown__body">
         <div className="token-breakdown__pane">
-        <div className="token-breakdown__views" role="tablist" aria-label="Group usage by">
-          <button type="button" role="tab" aria-selected={view === 'agent'} onClick={() => setView('agent')}>By agent <span>{agents.length}</span></button>
-          <button type="button" role="tab" aria-selected={view === 'model'} onClick={() => setView('model')}>By model <span>{modelRows.filter((row) => row.model !== UNATTRIBUTED_MODEL).length}</span></button>
+        <div className="token-breakdown__views" role="tablist" aria-label={t('tokens.groupBy')}>
+          <button type="button" role="tab" aria-selected={view === 'agent'} onClick={() => setView('agent')}>{t('tokens.byAgent')} <span>{agents.length}</span></button>
+          <button type="button" role="tab" aria-selected={view === 'model'} onClick={() => setView('model')}>{t('tokens.byModel')} <span>{modelRows.filter((row) => row.model !== UNATTRIBUTED_MODEL).length}</span></button>
         </div>
         <div className="token-breakdown__scroll">
           {view === 'agent' ? <table>
-            <thead><tr><th scope="col">Agent</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th></tr></thead>
+            <thead><tr><th scope="col">{t('tokens.colAgent')}</th><th scope="col">{t('tokens.colIn')}</th><th scope="col">{t('tokens.colOut')}</th><th scope="col" title={t('tokens.usdTitle', { note: totalCostNote })}>{t('tokens.colUsd')}</th></tr></thead>
             <tbody>{rows.map(agent => <tr key={agent.id}>
-              <th scope="row" title={agent.id}><strong>{agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : `Subagent · ${agent.id.slice(-8)}`)}</strong><span>{agent.type === 'main' ? 'Main' : agent.role || 'Subagent'} · {agent.model || 'Unknown model'}</span></th>
+              <th scope="row" title={agent.id}><strong>{agent.nickname || agent.role || (agent.type === 'main' ? t('tokens.mainAgent') : t('tokens.subagentId', { id: agent.id.slice(-8) }))}</strong><span>{agent.type === 'main' ? t('tokens.main') : agent.role || t('tokens.subagent')} · {agent.model || t('tokens.unknownModel')}</span></th>
               <td><RollingNumber value={agent.stats.inputTokens} /></td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costNote(costByAgentId.get(agent.id) as AgentCost)}><RollingText text={costLabel(costByAgentId.get(agent.id) as AgentCost)} /></td>
             </tr>)}</tbody>
-            <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
+            <tfoot><tr><th scope="row">{t('tokens.runTotal')}</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
           </table> : <table className="token-breakdown__models">
-            <thead><tr><th scope="col">Model</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th><th scope="col">Share of cost</th></tr></thead>
+            <thead><tr><th scope="col">{t('tokens.colModel')}</th><th scope="col">{t('tokens.colIn')}</th><th scope="col">{t('tokens.colOut')}</th><th scope="col" title={t('tokens.usdTitle', { note: totalCostNote })}>{t('tokens.colUsd')}</th><th scope="col">{t('tokens.colShare')}</th></tr></thead>
             <tbody>{modelRows.map(row => {
               const costShare = totalCost.knownUsd > 0 ? row.knownUsd / totalCost.knownUsd : 0;
               return <tr key={row.model}>
                 <th scope="row">
                   <strong>{row.model}</strong>
-                  <span>{row.agents} {row.agents === 1 ? 'agent' : 'agents'} · {share(row.inputTokens + row.outputTokens, totalTokens)} of tokens</span>
-                  <span>{row.rate ? `${rate(row.rate.input)} in · ${rate(row.rate.output)} out per 1M` : row.model === UNATTRIBUTED_MODEL ? 'No model recorded' : 'No verified rate'}</span>
+                  <span>{t('tokens.shareOfTokens', { agents: t('tokens.agentCount', { count: row.agents }), share: share(row.inputTokens + row.outputTokens, totalTokens) })}</span>
+                  <span>{row.rate ? t('tokens.rates', { input: rate(row.rate.input), output: rate(row.rate.output) }) : row.model === UNATTRIBUTED_MODEL ? t('tokens.noModel') : t('tokens.noRate')}</span>
                 </th>
-                <td><RollingNumber value={row.inputTokens} /><span className="token-breakdown__sub">{row.inputTokens ? `${share(row.cacheReadTokens, row.inputTokens)} cached` : '—'}</span></td>
+                <td><RollingNumber value={row.inputTokens} /><span className="token-breakdown__sub">{row.inputTokens ? t('tokens.cached', { share: share(row.cacheReadTokens, row.inputTokens) }) : '—'}</span></td>
                 <td><RollingNumber value={row.outputTokens} /></td>
                 <td className={`token-breakdown__cost ${row.complete ? '' : 'token-breakdown__cost--partial'}`} title={modelCostNote(row)}><RollingText text={modelCostLabel(row)} /></td>
-                <td className="token-breakdown__share" aria-label={`${share(row.knownUsd, totalCost.knownUsd)} of estimated cost`}>
+                <td className="token-breakdown__share" aria-label={t('tokens.shareOfCostLabel', { share: share(row.knownUsd, totalCost.knownUsd) })}>
                   <span className="token-breakdown__bar"><span style={{ width: `${Math.max(costShare > 0 ? 2 : 0, costShare * 100)}%` }} /></span>
                   <span>{row.knownUsd > 0 ? share(row.knownUsd, totalCost.knownUsd) : '—'}</span>
                 </td>
               </tr>;
             })}</tbody>
-            <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td><td className="token-breakdown__share"><span /><span>100%</span></td></tr></tfoot>
+            <tfoot><tr><th scope="row">{t('tokens.runTotal')}</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td><td className="token-breakdown__share"><span /><span>100%</span></td></tr></tfoot>
           </table>}
         </div>
         </div>

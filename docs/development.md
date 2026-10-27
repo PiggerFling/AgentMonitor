@@ -39,4 +39,6 @@ npm start
 
 `npm run dist` packages installers for the current platform into `release/` using `electron-builder.yml` (macOS `.dmg`/`.zip`, Windows NSIS `.exe`, Linux `.AppImage`). Builds are unsigned; macOS builds are ad-hoc signed so Apple Silicon can open them.
 
+On an Apple Silicon Mac, `scripts/build-mac.sh` does the whole thing without a system Node.js: it downloads the latest Node.js 22 into `.toolchain/` (checksum verified), runs `npm ci`, and packages `release/*-mac-arm64.dmg` and `.zip`; npm, Electron and electron-builder caches stay in `.toolchain/` too. `scripts/build-mac.sh install` then copies the app to `/Applications`, and `setup`, `build` and `clean` run single steps (`--help` lists them). Set `NODE_MIRROR` and `ELECTRON_MIRROR` (e.g. `https://npmmirror.com/mirrors/node`, `https://npmmirror.com/mirrors/electron/`) when the default download servers are slow.
+
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which packages the Apple Silicon (arm64) `.dmg` and `.zip` on a macOS runner and publishes a GitHub release with `.github/release-notes.md`. Bump `version` in `package.json` before tagging.

@@ -4,6 +4,8 @@ dist/
 dist-electron/
 dist-agent/
 release/
+# Node.js and caches downloaded by scripts/build-mac.sh
+/.toolchain/
 coverage/
 *.tsbuildinfo
 

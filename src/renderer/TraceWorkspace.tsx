@@ -76,42 +76,6 @@ function isoFor(timestamp: number | undefined) {
   return new Date(timestamp).toISOString();
 }
 
-function demoTrace(agent: Agent): TraceEntryDetails[] {
-  const base = agent.createdAt ?? Date.now() - 60_000;
-  return [
-    {
-      id: `${agent.id}-demo-discovered`,
-      timestamp: base,
-      kind: 'event',
-      text: t('trace.demo.discovered', { title: titleFor(agent) }),
-    },
-    {
-      id: `${agent.id}-demo-activity`,
-      timestamp: agent.lastActivityAt ?? base + 1_000,
-      kind: 'assistant',
-      text: agent.activity || t('trace.demo.activity'),
-      model: agent.model,
-      reasoningEffort: agent.reasoningEffort,
-      turnId: `${agent.id}-demo-turn`,
-    },
-    {
-      id: `${agent.id}-demo-tool`,
-      timestamp: base + 2_000,
-      kind: 'tool-call',
-      text: 'search: rg --files src tests',
-      callId: `${agent.id}-demo-call`,
-      toolName: 'search',
-    },
-    {
-      id: `${agent.id}-demo-result`,
-      timestamp: base + 3_000,
-      kind: 'tool-result',
-      text: t('trace.demo.result'),
-      callId: `${agent.id}-demo-call`,
-    },
-  ];
-}
-
 function isTextPart(value: unknown): value is { text: string } {
   return typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string';
 }
@@ -158,10 +122,9 @@ export interface TraceWorkspaceProps {
   onOpenAgent?: (agent: Agent) => void;
   /** Opens several traces as tabs without leaving this one. */
   onOpenAgents?: (agents: Agent[]) => void;
-  demo?: boolean;
 }
 
-export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, demo = false }: TraceWorkspaceProps) {
+export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents }: TraceWorkspaceProps) {
   const { t } = useI18n();
   const searchId = useId();
   const [entries, setEntries] = useState<TraceEntryDetails[]>([]);
@@ -180,14 +143,6 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
     setError(undefined);
     setEntries([]);
     setOpenDisclosure(new Set());
-
-    if (demo) {
-      setEntries(demoTrace(agent));
-      setLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
 
     const bridge = typeof window === 'undefined' ? undefined : window.agentMonitor;
     if (!bridge) {
@@ -214,7 +169,7 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
     return () => {
       cancelled = true;
     };
-  }, [agent.id, demo, refreshNonce]);
+  }, [agent.id, refreshNonce]);
 
   const { locale } = useI18n();
   const kindOptions = useMemo(() => [

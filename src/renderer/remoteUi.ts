@@ -1,63 +1,67 @@
 import { t } from './i18n';
-import type { Agent, AgentRun, RemoteHostStatus } from '../shared/types';
+import type { AgentRun, RemoteHostStatus } from '../shared/types';
 
-/**
- * Host filter values. Remote hosts are keyed by label (that is what `AgentRun.host` carries) and
- * prefixed so a server labelled "all" or "local" cannot collide with the built-in options.
- */
-export type HostFilter = string;
-export const HOST_ALL: HostFilter = 'all';
-export const HOST_LOCAL: HostFilter = 'local';
-const REMOTE_PREFIX = 'host:';
-
-export function remoteHostFilter(label: string): HostFilter {
-  return `${REMOTE_PREFIX}${label}`;
+/** A sidebar group of runs: this machine's own runs, or the runs of one remote server. */
+export interface RunGroup<T> {
+  /** Stable id used to remember the collapsed state: `local`, `remote:<server id>` or `host:<label>`. */
+  id: string;
+  kind: 'local' | 'remote';
+  /** Server label; empty for the local group. */
+  label: string;
+  /** Connection state, when the group belongs to a server the monitor reports on. */
+  remote?: RemoteHostStatus;
+  runs: T[];
 }
 
-export interface HostOption { value: HostFilter; label: string }
+export const LOCAL_GROUP_ID = 'local';
 
-/** Options for the Host dropdown; empty when no remotes are configured (the dropdown is then hidden). */
-export function buildHostOptions(remotes: readonly RemoteHostStatus[] | undefined): HostOption[] {
-  if (!remotes?.length) return [];
-  const seen = new Set<string>();
-  const options: HostOption[] = [{ value: HOST_ALL, label: t('remote.allHosts') }, { value: HOST_LOCAL, label: t('remote.local') }];
+/**
+ * Groups runs by where they come from: the local group first, then one group per configured remote (in
+ * config order, also while it has no runs), then any host that runs name but no remote reports.
+ * Runs keep their order within a group.
+ */
+export function groupRunsBySource<T extends Pick<AgentRun, 'host'>>(runs: readonly T[], remotes: readonly RemoteHostStatus[] = []): RunGroup<T>[] {
+  const local: RunGroup<T> = { id: LOCAL_GROUP_ID, kind: 'local', label: '', runs: [] };
+  const groups = [local];
+  const byLabel = new Map<string, RunGroup<T>>();
   for (const remote of remotes) {
-    if (seen.has(remote.label)) continue;
-    seen.add(remote.label);
-    options.push({ value: remoteHostFilter(remote.label), label: remote.label });
+    if (byLabel.has(remote.label)) continue;
+    const group: RunGroup<T> = { id: `remote:${remote.id}`, kind: 'remote', label: remote.label, remote, runs: [] };
+    byLabel.set(remote.label, group);
+    groups.push(group);
   }
-  return options;
+  for (const run of runs) {
+    if (!run.host) { local.runs.push(run); continue; }
+    let group = byLabel.get(run.host);
+    if (!group) {
+      group = { id: `host:${run.host}`, kind: 'remote', label: run.host, runs: [] };
+      byLabel.set(run.host, group);
+      groups.push(group);
+    }
+    group.runs.push(run);
+  }
+  return groups;
 }
 
-/** The filter actually applied: falls back to all hosts when the chosen host is no longer configured. */
-export function resolveHostFilter(filter: HostFilter, remotes: readonly RemoteHostStatus[] | undefined): HostFilter {
-  return buildHostOptions(remotes).some((option) => option.value === filter) ? filter : HOST_ALL;
+const COLLAPSED_KEY = 'agent-monitor.sidebar.collapsedGroups';
+
+export function readCollapsedGroups(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(COLLAPSED_KEY) ?? '[]');
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
 }
 
-export function runMatchesHost(run: Pick<AgentRun, 'host'>, filter: HostFilter): boolean {
-  if (filter === HOST_ALL) return true;
-  if (filter === HOST_LOCAL) return !run.host;
-  return run.host !== undefined && remoteHostFilter(run.host) === filter;
+export function saveCollapsedGroups(groups: ReadonlySet<string>, storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage): void {
+  try { storage?.setItem(COLLAPSED_KEY, JSON.stringify([...groups])); } catch { /* Still usable without storage. */ }
 }
 
-export function filterRunsByHost<T extends Pick<AgentRun, 'host'>>(runs: readonly T[], filter: HostFilter): T[] {
-  return filter === HOST_ALL ? [...runs] : runs.filter((run) => runMatchesHost(run, filter));
-}
-
-/**
- * Agents carry no host of their own, so they follow the run they belong to. Agents whose run is not
- * in `runs` can't be attributed to a host and are only kept when every host is shown.
- */
-export function filterAgentsByHost<T extends Pick<Agent, 'runId'>>(agents: readonly T[], runs: readonly AgentRun[], filter: HostFilter): T[] {
-  if (filter === HOST_ALL) return [...agents];
-  const matchingRunIds = new Set(runs.filter((run) => runMatchesHost(run, filter)).map((run) => run.id));
-  return agents.filter((agent) => matchingRunIds.has(agent.runId));
-}
-
-/** Host tag text for a run: nothing when only the local machine is monitored, otherwise the host or "local". */
-export function runHostLabel(run: Pick<AgentRun, 'host'>, remotesConfigured: boolean): string | undefined {
-  if (run.host) return run.host;
-  return remotesConfigured ? t('remote.localTag') : undefined;
+export function toggleGroup(groups: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(groups);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  return next;
 }
 
 export interface MonitorHealth {

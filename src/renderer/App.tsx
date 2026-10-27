@@ -65,8 +65,8 @@ import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
 import { useNumberFormat } from './numberFormat';
-import { Segmented } from './Segmented';
-import { activeRunIds, filterRunsByTime, readRunTimeRange, RUN_TIME_RANGES, saveRunTimeRange, type RunTimeRange } from './runFilter';
+import { DateRangePicker } from './DateRangePicker';
+import { activeRunIds, filterRunsByRange, readRunRange, saveRunRange, type RunRange } from './runFilter';
 import { formatNumber, formatRelativeTime, t, useI18n, type MessageKey } from './i18n';
 import { SettingsPage, settingsShortcut, type MonitorMode } from './SettingsPage';
 import { assessMonitorHealth, groupRunsBySource, readCollapsedGroups, remoteIndicatorState, remoteStatusTitle, saveCollapsedGroups, toggleGroup, type RemoteIndicatorState } from './remoteUi';
@@ -746,8 +746,8 @@ type SidebarProps = {
   runs: AgentRun[];
   /** Every run, to tell an empty group from one whose runs the time range hides. */
   allRuns: AgentRun[];
-  timeRange: RunTimeRange;
-  onTimeRange: (range: RunTimeRange) => void;
+  timeRange: RunRange;
+  onTimeRange: (range: RunRange) => void;
   agents: Agent[];
   selectedRunId?: string;
   loadedRunId?: string;
@@ -811,8 +811,7 @@ function Sidebar({ runs, allRuns, timeRange, onTimeRange, agents, selectedRunId,
       <div className="sidebar__section">
         <div className="sidebar__section-head">
           <span>{t('app.sidebar.recentRuns')}</span>
-          <Segmented small label={t('app.sidebar.range.label')} value={timeRange} onChange={onTimeRange}
-            options={RUN_TIME_RANGES.map((range) => ({ value: range, label: t(`app.sidebar.range.${range}.short`), title: t(`app.sidebar.range.${range}.title`) }))} />
+          <DateRangePicker value={timeRange} onChange={onTimeRange} />
           <span className="sidebar__section-count">{runs.length}</span>
         </div>
         {groups.map((group) => {
@@ -837,7 +836,7 @@ function Sidebar({ runs, allRuns, timeRange, onTimeRange, agents, selectedRunId,
             emptyText = t('app.sidebar.groupEmpty');
           }
           // Runs exist but are older than the time range: say so instead of "no runs".
-          if (!group.runs.length && (totals.get(group.id) ?? 0) > 0 && dot !== 'error') emptyText = t(`app.sidebar.range.${timeRange}.empty`);
+          if (!group.runs.length && (totals.get(group.id) ?? 0) > 0 && dot !== 'error') emptyText = t(`app.sidebar.range.${timeRange.kind}.empty`);
           const listId = `run-group-${group.id}`;
           return <section key={group.id} className={`run-group run-group--${dot}`}>
             <button type="button" className="run-group__head" aria-expanded={open} aria-controls={listId} title={title} aria-label={`${open ? t('app.sidebar.collapseGroup', { name }) : t('app.sidebar.expandGroup', { name })}. ${title.split('\n').slice(1).join('. ')}`.trim()} onClick={() => toggle(group.id)}>
@@ -884,16 +883,17 @@ function App() {
   const remotesConfigured = remotes.length > 0;
 
   const runs = useMemo(() => sourceSnapshot.runs.filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
-  const [timeRange, setTimeRange] = useState<RunTimeRange>(() => readRunTimeRange());
-  const changeTimeRange = useCallback((range: RunTimeRange) => { setTimeRange(range); saveRunTimeRange(range); }, []);
-  // Re-filter once a minute so runs leave the range without waiting for a snapshot.
+  const [timeRange, setTimeRange] = useState<RunRange>(() => readRunRange());
+  // Only presets are remembered; a custom range lasts for this session.
+  const changeTimeRange = useCallback((range: RunRange) => { setTimeRange(range); saveRunRange(range); }, []);
+  // Re-filter once a minute so rolling ranges move without waiting for a snapshot.
   const [clock, setClock] = useState(now);
   useEffect(() => {
     const timer = window.setInterval(() => setClock(now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
   const liveRunIds = useMemo(() => activeRunIds(sourceSnapshot.agents), [sourceSnapshot.agents]);
-  const recentRuns = useMemo(() => filterRunsByTime(runs, timeRange, { now: clock, activeRunIds: liveRunIds, selectedRunId }), [clock, liveRunIds, runs, selectedRunId, timeRange]);
+  const recentRuns = useMemo(() => filterRunsByRange(runs, timeRange, { now: clock, activeRunIds: liveRunIds, selectedRunId }), [clock, liveRunIds, runs, selectedRunId, timeRange]);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);

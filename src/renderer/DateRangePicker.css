@@ -1,0 +1,63 @@
+/* Run time range: compact trigger in the sidebar header and its calendar popover (Dropdown visual language). */
+.range-trigger { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 168px; height: 22px; margin-left: auto; margin-right: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--control-text); background: var(--surface-2); cursor: pointer; font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none; white-space: nowrap; transition: border-color 150ms ease, color 150ms ease, background 150ms ease; }
+.range-trigger:hover, .range-trigger[aria-expanded='true'] { border-color: var(--border-strong); color: var(--text); background: var(--surface-3); }
+.range-trigger__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.range-trigger > svg { flex: 0 0 auto; color: var(--dim); }
+
+.range-picker { position: fixed; z-index: 200; display: grid; gap: 8px; overflow: auto; padding: 10px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--panel-bg); box-shadow: 0 18px 42px var(--shadow-heavy); backdrop-filter: blur(12px); font-size: 12px; }
+.range-picker:focus { outline: none; }
+.range-picker button { font: inherit; }
+.range-picker :is(button, input):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.range-picker__presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.range-picker__preset { min-height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+.range-picker__preset:hover { color: var(--text); background: var(--hover-bg); }
+.range-picker__preset[aria-pressed='true'] { border-color: var(--accent-border); color: var(--primary-text); background: var(--accent-wash); }
+
+.range-picker__month { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 2px; }
+.range-picker__month-label { color: var(--text-strong); font-weight: 600; }
+.range-picker__nav { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.range-picker__nav:hover:not(:disabled) { border-color: var(--border); color: var(--text); background: var(--hover-bg); }
+.range-picker__nav:disabled { cursor: default; opacity: 0.35; }
+
+.range-picker__grid { display: grid; gap: 2px; }
+.range-picker__row { display: grid; grid-template-columns: repeat(7, 1fr); }
+.range-picker__weekday { display: grid; place-items: center; height: 22px; color: var(--dim); font-size: 11px; }
+.range-picker__day { position: relative; height: 30px; border: 1px solid transparent; border-radius: 0; color: var(--text); background: transparent; cursor: pointer; font-variant-numeric: tabular-nums; }
+.range-picker__day:hover:not(:disabled) { border-color: var(--border-strong); border-radius: 6px; }
+.range-picker__day--outside { color: var(--dim); }
+.range-picker__day:disabled { color: var(--faint); cursor: default; opacity: 0.55; }
+.range-picker__day--in-range { background: var(--accent-wash); }
+.range-picker__day--start { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.range-picker__day--end { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.range-picker__day--start, .range-picker__day--end { border-color: var(--accent-border); color: var(--primary-text); background: color-mix(in srgb, var(--accent) 24%, transparent); font-weight: 600; }
+.range-picker__day--today::after { position: absolute; bottom: 3px; left: 50%; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); content: ''; transform: translateX(-50%); }
+:root[data-theme='light'] .range-picker__day--start, :root[data-theme='light'] .range-picker__day--end { color: var(--accent-deep); }
+
+.range-picker__times { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: 6px 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.range-picker__time-label { color: var(--dim); }
+.range-picker__date { min-width: 42px; color: var(--control-text); font-variant-numeric: tabular-nums; }
+.time-field { display: inline-flex; align-items: center; height: 26px; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+.time-field:focus-within { border-color: var(--accent-border); }
+.time-field--invalid { border-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+.time-field--disabled { opacity: 0.55; }
+.time-field input { width: 2.1ch; padding: 0; border: 0; color: var(--control-text); background: transparent; font: inherit; font-variant-numeric: tabular-nums; text-align: center; }
+.time-field input:focus-visible { outline: none; border-radius: 3px; background: var(--accent-wash); }
+.time-field__colon { color: var(--dim); }
+.range-picker__now { display: inline-flex; align-items: center; justify-self: end; gap: 6px; padding: 2px 4px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+.range-picker__now:hover { color: var(--text); }
+.range-picker__now[aria-checked='true'] { color: var(--text); }
+.range-picker__switch { position: relative; width: 24px; height: 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-3); transition: background 150ms ease, border-color 150ms ease; }
+.range-picker__switch::after { position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); content: ''; transition: transform 150ms ease, background 150ms ease; }
+.range-picker__now[aria-checked='true'] .range-picker__switch { border-color: var(--accent-border); background: var(--accent-wash); }
+.range-picker__now[aria-checked='true'] .range-picker__switch::after { background: var(--accent); transform: translateX(10px); }
+
+.range-picker__problem { min-height: 14px; margin-top: -2px; color: var(--danger); font-size: 11px; }
+.range-picker__problem:empty { display: none; }
+
+.range-picker__footer { display: flex; justify-content: flex-end; gap: 6px; }
+.range-picker__button { min-height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--control-text); background: var(--surface-2); cursor: pointer; }
+.range-picker__button:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-3); }
+.range-picker__button--primary { border-color: var(--accent-border); color: var(--primary-text); background: var(--accent-wash); }
+.range-picker__button--primary:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.range-picker__button:disabled { cursor: not-allowed; opacity: 0.5; }

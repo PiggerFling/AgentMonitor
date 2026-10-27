@@ -340,6 +340,7 @@ export const zhCN: Messages = {
     estimateUsd: 'API Token 估算（USD）',
     estimateNote: 'API Token 估算 · 费率核验于 {date} · 未指定时按标准层级计算 · 非订阅账单',
     excludes: '不含 {tokens} 个费率未知或用量元数据不完整的 Token',
+    excludesShort: '不含 {tokens} 个未计价 Token',
     groupBy: '用量分组方式',
     byAgent: '按智能体',
     byModel: '按模型',

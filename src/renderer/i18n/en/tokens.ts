@@ -33,6 +33,7 @@ export const tokens = {
   estimateUsd: 'API token estimate (USD)',
   estimateNote: 'API token estimate · rates verified {date} · standard tier when unspecified · not a subscription bill',
   excludes: 'Excludes {tokens} tokens with unknown pricing or incomplete usage metadata',
+  excludesShort: 'Excludes {tokens} unpriced tokens',
   groupBy: 'Group usage by',
   byAgent: 'By agent',
   byModel: 'By model',

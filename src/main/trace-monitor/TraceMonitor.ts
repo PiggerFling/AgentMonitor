@@ -327,28 +327,29 @@ export class TraceMonitor extends EventEmitter {
     watcher.on('unlink', (filePath) => {
       if (isTraceFile(filePath)) void this.enqueueDelete(filePath);
     });
-    if (process.platform === 'win32') {
-      // Windows writers can keep mtime unchanged until closing their handle.
-      // Chokidar filters these changes when atime is newer, even if size grew.
-      // Its raw notification still arrives; reconcile it through the same queue.
-      watcher.on('raw', (event, filePath, details: unknown) => {
-        if (event !== 'change' || !this.started || this.watcher !== watcher) return;
-        const watchedPath = objectValue(details)?.watchedPath;
-        let candidate: string | undefined;
-        if (typeof filePath === 'string' && path.isAbsolute(filePath)) candidate = filePath;
-        else if (typeof watchedPath === 'string' && path.isAbsolute(watchedPath)) {
-          if (isTraceFile(watchedPath)) candidate = watchedPath;
-          else if (typeof filePath === 'string') candidate = path.join(watchedPath, filePath);
-        }
-        if (!candidate || !isTraceFile(candidate)) return;
-        const normalized = path.resolve(candidate);
-        if (!this.roots.some(root => {
-          const relative = path.relative(root, normalized);
-          return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-        })) return;
-        void this.enqueueObserved(normalized);
-      });
-    }
+    // Chokidar drops a change that follows another within 50ms (no trailing
+    // event), so the end of a write burst would stay unread. Windows writers
+    // can also keep mtime unchanged until closing their handle, which
+    // chokidar filters when atime is newer even if size grew. The raw
+    // notification still arrives; reconcile it through the same queue,
+    // whose signature check drops duplicates.
+    watcher.on('raw', (event, filePath, details: unknown) => {
+      if (event !== 'change' || !this.started || this.watcher !== watcher) return;
+      const watchedPath = objectValue(details)?.watchedPath;
+      let candidate: string | undefined;
+      if (typeof filePath === 'string' && path.isAbsolute(filePath)) candidate = filePath;
+      else if (typeof watchedPath === 'string' && path.isAbsolute(watchedPath)) {
+        if (isTraceFile(watchedPath)) candidate = watchedPath;
+        else if (typeof filePath === 'string') candidate = path.join(watchedPath, filePath);
+      }
+      if (!candidate || !isTraceFile(candidate)) return;
+      const normalized = path.resolve(candidate);
+      if (!this.roots.some(root => {
+        const relative = path.relative(root, normalized);
+        return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+      })) return;
+      void this.enqueueObserved(normalized);
+    });
     // The ready/error wait below owns EMFILE fallback. Other errors are
     // surfaced immediately while the watcher remains usable if possible.
     watcher.on('error', (error) => {

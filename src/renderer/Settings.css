@@ -79,6 +79,8 @@
 .button--danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .button--danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 18%, transparent); }
 :is(.settings, .modal) .button:disabled, :is(.settings, .modal) .icon-button:disabled { cursor: not-allowed; opacity: 0.5; }
+/* A button showing its own progress stays readable while it is disabled. */
+:is(.settings, .modal) .button[aria-busy='true']:disabled { cursor: progress; opacity: 1; }
 .icon-button--danger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* Server list. */
@@ -101,6 +103,11 @@
 .modal-backdrop { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--bg) 62%, transparent); backdrop-filter: blur(3px); }
 .modal { display: flex; flex-direction: column; width: min(480px, 100%); max-height: min(760px, calc(100vh - 48px)); border: 1px solid var(--border-strong); border-radius: 12px; color: var(--text); background: var(--panel-bg); box-shadow: 0 24px 64px var(--shadow-heavy); font-size: 12.5px; user-select: text; -webkit-app-region: no-drag; animation: modal-enter 140ms ease-out; }
 .modal--wide { width: min(620px, 100%); }
+/* Fixed-height frame: switching steps or filtering never resizes the dialog; the body scrolls instead. */
+.modal--fixed { height: clamp(420px, 70vh, 720px); max-height: calc(100vh - 48px); }
+.modal--fixed .modal__body { flex: 1 1 auto; align-content: start; }
+.modal__body--picker { display: flex; flex-direction: column; overflow: hidden; }
+.modal--fixed .modal__body--center { align-content: center; justify-items: center; }
 .modal:focus { outline: none; }
 .modal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 10px 18px; }
 .modal__head h2 { margin: 0; color: var(--text-strong); font-size: 15px; font-weight: 650; }
@@ -114,7 +121,7 @@
 /* Host picker. */
 .host-search { display: flex; align-items: center; gap: 8px; color: var(--dim); }
 .host-search > svg { flex: 0 0 auto; }
-.host-list { display: grid; gap: 4px; max-height: 360px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.host-list { display: grid; flex: 1 1 auto; align-content: start; gap: 4px; min-height: 0; margin: 0 -4px; padding: 0 4px 2px; overflow: auto; list-style: none; }
 .host-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; color: inherit; background: var(--soft-bg); cursor: pointer; text-align: left; }
 .host-option:hover:not(:disabled) { border-color: var(--accent-border); background: var(--active-bg); }
 .host-option:disabled { cursor: default; opacity: 0.7; }
@@ -131,6 +138,19 @@
 .probe-card__status--ok > svg { color: var(--status-finished); }
 .probe-card__status .button--quiet { margin-left: auto; gap: 4px; font-size: 11px; }
 .probe-card__home { color: var(--dim); }
+
+/* Success state after adding a server: a check mark that draws itself in. */
+.deploy-success { display: grid; justify-items: center; gap: 6px; max-width: 380px; padding: 12px 0 24px; text-align: center; }
+.deploy-success p { margin: 0; }
+.deploy-success__check { width: 64px; height: 64px; margin-bottom: 10px; overflow: visible; }
+.deploy-success__ring { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 145; stroke-dashoffset: 0; transform: rotate(-90deg); transform-origin: center; animation: deploy-ring 520ms cubic-bezier(.65, 0, .45, 1) both; }
+.deploy-success__tick { fill: none; stroke: var(--accent); stroke-linecap: round; stroke-linejoin: round; stroke-width: 3.5; stroke-dasharray: 34; stroke-dashoffset: 0; animation: deploy-tick 320ms cubic-bezier(.65, 0, .45, 1) 440ms both; }
+.deploy-success__title { color: var(--text-strong); font-size: 16px; font-weight: 650; animation: deploy-text 300ms ease-out 360ms both; }
+.deploy-success__body { color: var(--muted); line-height: 1.55; animation: deploy-text 300ms ease-out 440ms both; }
+@keyframes deploy-ring { from { stroke-dashoffset: 145; fill: transparent; } 70% { fill: transparent; } }
+@keyframes deploy-tick { from { stroke-dashoffset: 34; } }
+@keyframes deploy-text { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .deploy-success__ring, .deploy-success__tick, .deploy-success__title, .deploy-success__body { animation: none; } }
 
 /* Setup progress and failures (shared by probe, add and remove). */
 .servers-flow { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--muted); line-height: 1.5; }

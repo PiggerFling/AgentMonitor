@@ -3,6 +3,8 @@ import net from 'node:net';
 import type { Duplex } from 'node:stream';
 import { AGENT_DEFAULT_PORT, type RemoteEndpoint } from '../../shared/remoteProtocol';
 import { StreamMux } from '../../shared/streamMux';
+import type { TraceSourceOptions } from '../../shared/types';
+import { agentTraceArgs } from '../trace-monitor/traceSources';
 
 /** A server whose agent the app installed under `<home>/.agent-monitor`; the tunnel starts it per connection. */
 export interface ManagedAgent {
@@ -11,6 +13,8 @@ export interface ManagedAgent {
   nodePath: string;
   /** Hex sha256 of the bundled agent.cjs; a remote agent.sha256 that differs means the agent must be reinstalled. */
   agentSha256: string;
+  /** Tools and data directories passed to the agent as flags; directories validated by config.ts. */
+  traceOptions?: TraceSourceOptions;
 }
 
 export interface SshTunnelOptions {
@@ -49,8 +53,9 @@ export function remoteSh(script: string): string { return `sh -c ${shellQuote(sc
 
 /** The command line run by the remote login shell for a managed agent serving on its stdin/stdout. */
 export function managedRemoteCommand(managed: ManagedAgent): string {
+  const flags = agentTraceArgs(managed.traceOptions ?? {}).map(arg => ` ${shellQuote(arg)}`).join('');
   return remoteSh(`cd ${shellQuote(`${managed.home}/.agent-monitor`)} && [ "$(cat agent.sha256 2>/dev/null)" = ${shellQuote(managed.agentSha256)} ] || exit ${AGENT_OUTDATED_EXIT_CODE}; `
-    + `exec ${shellQuote(managed.nodePath)} agent.cjs --stdio`);
+    + `exec ${shellQuote(managed.nodePath)} agent.cjs --stdio${flags}`);
 }
 
 /**

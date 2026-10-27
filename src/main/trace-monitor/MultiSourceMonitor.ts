@@ -48,6 +48,26 @@ export class MultiSourceMonitor extends EventEmitter {
     this.relay();
   }
 
+  /**
+   * Swaps `removed` for `added` (e.g. watchers with new options) with a single snapshot change: the new sources are
+   * started first when the monitor runs, then take the old ones' place, which are stopped. A run selected in an old
+   * source is reloaded from the new ones when they have it.
+   */
+  async replaceSources(removed: MonitorSource[], added: MonitorSource[]): Promise<void> {
+    added = added.filter(source => !this.sources.includes(source));
+    if (this.startPromise) await Promise.allSettled(added.map(source => source.start()));
+    const old = removed.filter(source => this.sources.includes(source));
+    const reload = this.selectedSource && old.includes(this.selectedSource) ? this.selectedRunId : undefined;
+    if (reload) this.unloadRun();
+    const at = old.length ? Math.min(...old.map(source => this.sources.indexOf(source))) : this.sources.length;
+    for (const source of old) { this.sources.splice(this.sources.indexOf(source), 1); source.off('snapshot', this.relay); }
+    this.sources.splice(at, 0, ...added);
+    for (const source of added) source.on('snapshot', this.relay);
+    this.relay();
+    await Promise.all(old.map(source => source.stop()));
+    if (reload && !this.selectedRunId && added.some(source => source.snapshot().runs.some(run => run.id === reload))) await this.loadRun(reload).catch(() => {});
+  }
+
   start(): Promise<void> {
     this.startPromise ??= Promise.all(this.sources.map(source => source.start())).then(() => undefined);
     return this.startPromise;

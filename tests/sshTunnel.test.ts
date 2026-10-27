@@ -163,6 +163,13 @@ test('the managed remote command means the same to every installed login shell',
   const shells = ['sh', 'bash', 'zsh', 'fish', 'csh', 'tcsh'].filter(shell => { try { execFileSync('sh', ['-c', `command -v ${shell}`], { stdio: 'ignore' }); return true; } catch { return false; } });
   assert.ok(shells.includes('sh'));
   for (const shell of shells) assert.equal(execFileSync(shell, ['-c', command], { encoding: 'utf8' }), 'agent.cjs|--stdio|', shell);
+  // Trace options become one word each, whatever the login shell.
+  const traceOptions = { tools: ['claude' as const, 'codex' as const], traceDirs: { codex: '/home/a b/$HOME/`x`/"q"/*/.codex', claude: '/c;d&e' } };
+  const withOptions = managedRemoteCommand({ home: path.join(root, 'it is'), nodePath: node, agentSha256: sha, traceOptions });
+  assert.doesNotMatch(withOptions.slice('sh -c '.length).replaceAll(`'\\''`, ''), /[\\\n]/);
+  for (const shell of shells) {
+    assert.equal(execFileSync(shell, ['-c', withOptions], { encoding: 'utf8' }), `agent.cjs|--stdio|--tools=claude,codex|--claude-dir=/c;d&e|--codex-dir=${traceOptions.traceDirs.codex}|`, shell);
+  }
   await writeFile(path.join(dir, 'agent.sha256'), 'b'.repeat(64));
   for (const shell of shells) assert.throws(() => execFileSync(shell, ['-c', command], { stdio: 'ignore' }), (error: { status?: number }) => error.status === 42, shell);
 });

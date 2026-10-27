@@ -113,3 +113,28 @@ test('the bundled agent is found in resources when packaged and in dist-agent in
   assert.deepEqual(loadAgentBundle({ ...options, packaged: true }), { path: path.join(dir, 'resources', 'agent.cjs'), sha256: sha('packaged') });
   assert.throws(() => loadAgentBundle({ ...options, mainDir: dir, packaged: false }), /ENOENT/);
 });
+
+test('tools and traceDirs are validated and normalized', () => {
+  const { servers, errors } = parseServersConfig({ servers: [
+    { id: 'a', ssh: 'a', tools: ['codex', 'claude', 'codex'], traceDirs: { codex: '/home/u/.config/codex', pi: '' } },
+    { id: 'all', ssh: 'all', tools: ['hermes', 'pi', 'codex', 'claude'], traceDirs: {} },
+    { id: 'none', ssh: 'none', tools: [] },
+    { id: 'tool', ssh: 'x', tools: ['cursor'] },
+    { id: 'tools', ssh: 'x', tools: 'claude' },
+    { id: 'dirs', ssh: 'x', traceDirs: [] },
+    { id: 'key', ssh: 'x', traceDirs: { cursor: '/x' } },
+    { id: 'rel', ssh: 'x', traceDirs: { codex: 'codex' } },
+    { id: 'quote', ssh: 'x', traceDirs: { claude: "/it's" } },
+    { id: 'slash', ssh: 'x', traceDirs: { claude: '/a\\b' } },
+    { id: 'ctl', ssh: 'x', traceDirs: { claude: '/a\nb' } },
+  ] });
+  assert.deepEqual(servers.map(({ id, tools, traceDirs }) => ({ id, tools, traceDirs })), [
+    { id: 'a', tools: ['claude', 'codex'], traceDirs: { codex: '/home/u/.config/codex' } },
+    { id: 'all', tools: undefined, traceDirs: undefined },
+    { id: 'none', tools: [], traceDirs: undefined },
+  ]);
+  assert.equal(errors.length, 8);
+  assert.match(errors[0], /\(tool\) skipped: "tools" must be an array of claude, codex, pi, hermes/);
+  assert.match(errors[3], /\(key\) skipped: "traceDirs" has an unknown tool "cursor"/);
+  for (const error of errors.slice(4)) assert.match(error, /"traceDirs\.(codex|claude)" must be an absolute POSIX path without quotes, backslashes or control characters/);
+});

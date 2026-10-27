@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import type { ServerSetupErrorCode, ServerSetupStep } from '../../shared/types';
+import { TRACE_TOOLS, type ServerSetupErrorCode, type ServerSetupStep, type TraceDirs, type TraceTool } from '../../shared/types';
+import { TRACE_TOOL_HOMES } from '../trace-monitor/traceSources';
 import type { AgentBundle } from './agentBundle';
 import { validRemotePath } from './config';
 import { remoteSh, shellQuote } from './sshTunnel';
@@ -107,32 +108,53 @@ function markedLines(stdout: string, marker: string): [string, string][] {
 const parseVersion = (text: string) => { const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(text.trim()); return match ? match.slice(1, 4).map(Number) : undefined; };
 const compare = (a: number[], b: number[]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
-/** The probe script for `sh -s`. Braces make sh read all of it before running anything that could consume stdin. */
-export function probeScript(marker: string, candidates = NODE_CANDIDATES): string {
+/** A tool's default data directory on a server with home directory `home`. */
+export const defaultRemoteTraceDir = (home: string, tool: TraceTool) => [home, ...TRACE_TOOL_HOMES[tool].home].join('/');
+
+/**
+ * The probe script for `sh -s`. Braces make sh read all of it before running anything that could consume stdin.
+ * The login shell is asked for its node, and the interactive login shell for its `env`, the source of data directories
+ * exported only in ~/.zshrc or ~/.bashrc (the agent's non-interactive session does not see them); output after a
+ * marker line is used, so rc output is skipped. Each runs in the background into a temp file and is killed after
+ * `shellSeconds`, so a misbehaving rc file cannot hang the probe; then the probe's own environment or the default applies.
+ */
+export function probeScript(marker: string, candidates = NODE_CANDIDATES, shellSeconds = 8): string {
+  const dirs = TRACE_TOOLS.map(tool => { const { env, home } = TRACE_TOOL_HOMES[tool]; return `dir ${env} "\${${env}:-$HOME/${home.join('/')}}" ${tool}`; });
   return `{
 exec </dev/null
 m=${shellQuote(marker)}
 echo "$m home=$HOME"
 echo "$m os=$(uname -s 2>/dev/null)"
 echo "$m arch=$(uname -m 2>/dev/null)"
+t=$(mktemp 2>/dev/null) || t=
+login() { [ -n "$t" ] && : >"$t" || return 0; case "$SHELL" in /*) [ -x "$SHELL" ] || return 0;; *) return 0;; esac
+"$SHELL" "$@" >"$t" 2>/dev/null & p=$!; ( sleep ${shellSeconds}; kill -9 "$p" ) >/dev/null 2>&1 & w=$!; wait "$p" 2>/dev/null; kill "$w" 2>/dev/null; }
 check() { case "$1" in /*) [ -f "$1" ] && [ -x "$1" ] || return 0; v=$("$1" -p 'process.versions.node' 2>/dev/null) || return 0; echo "$m node=$v $1";; esac; }
 check "$(command -v node 2>/dev/null)"
-case "$SHELL" in /*) [ -x "$SHELL" ] && check "$("$SHELL" -lc 'command -v node' 2>/dev/null | tail -n 1)";; esac
+login -lc 'command -v node'
+check "$(tail -n 1 "$t" 2>/dev/null)"
 for n in ${candidates.join(' ')}; do check "$n"; done
+login -ilc "echo $m-env; env"
+e=$(sed -n '/^'"$m"'-env$/,$p' "$t" 2>/dev/null)
+[ -n "$t" ] && rm -f "$t"
+dir() { v=$(printf '%s\\n' "$e" | sed -n "s/^$1=//p" | tail -n 1); [ -n "$v" ] || v=$2; echo "$m dir.$3=$v"; [ -d "$v" ] && echo "$m present=$3"; }
+${dirs.join('\n')}
 echo "$m done=1"
 }
 `;
 }
 
-export interface ProbeResult { home: string; os: string; arch: string; nodePath: string; nodeVersion: string }
+/** `detected` has every tool's data directory (the default when unset or unusable); `present` the tools whose directory exists. */
+export interface ProbeResult { home: string; os: string; arch: string; nodePath: string; nodeVersion: string; detected: Required<TraceDirs>; present: TraceTool[] }
 
 /**
- * Inspects the server: home directory, OS, and the newest node >= MIN_NODE_VERSION among PATH, the login shell's PATH
- * and the usual version-manager and system locations. `nodeCandidates` replaces the fixed locations (tests).
+ * Inspects the server: home directory, OS, the newest node >= MIN_NODE_VERSION among PATH, the login shell's PATH
+ * and the usual version-manager and system locations, and each tool's data directory (see probeScript).
+ * `nodeCandidates` replaces the fixed node locations and `shellSeconds` the interactive shell's time limit (tests).
  */
-export async function probeServer(options: SshCommandOptions & { nodeCandidates?: string[] }): Promise<ProbeResult> {
+export async function probeServer(options: SshCommandOptions & { nodeCandidates?: string[]; shellSeconds?: number }): Promise<ProbeResult> {
   const marker = `agent-monitor-probe-${randomBytes(8).toString('hex')}`;
-  const result = await run(options, 'sh -s', probeScript(marker, options.nodeCandidates));
+  const result = await run(options, 'sh -s', probeScript(marker, options.nodeCandidates, options.shellSeconds));
   const lines = markedLines(result.stdout, marker);
   const value = (key: string) => lines.find(([name]) => name === key)?.[1] ?? '';
   if (!value('done')) throw new ServerSetupError('failed', `Could not inspect ${options.ssh}; is /bin/sh available?`, { detail: tail(result.stderr) || `exit code ${result.code}` });
@@ -148,7 +170,13 @@ export async function probeServer(options: SshCommandOptions & { nodeCandidates?
   if (compare(best.version, parseVersion(MIN_NODE_VERSION)!) < 0) {
     throw new ServerSetupError('node-too-old', `${options.ssh} has Node.js ${best.text} at ${best.path}; the agent needs ${MIN_NODE_VERSION} or newer`, { nodeVersion: best.text });
   }
-  return { home, os, arch: value('arch'), nodePath: best.path, nodeVersion: best.text };
+  // Directories that cannot be passed to the agent fall back to the default.
+  const detected = Object.fromEntries(TRACE_TOOLS.map(tool => {
+    const dir = value(`dir.${tool}`).replace(/(.)\/+$/, '$1');
+    return [tool, validRemotePath(dir) ? dir : defaultRemoteTraceDir(home, tool)];
+  })) as Required<TraceDirs>;
+  const present = TRACE_TOOLS.filter(tool => lines.some(([name, text]) => name === 'present' && text === tool));
+  return { home, os, arch: value('arch'), nodePath: best.path, nodeVersion: best.text, detected, present };
 }
 
 /**
@@ -180,7 +208,7 @@ export async function removeAgent(options: SshCommandOptions & { home: string })
 export type SetupProgress = (step: Exclude<ServerSetupStep, 'save'>, state: 'running' | 'done' | 'failed') => void;
 
 /** Probes the server and installs the agent, reporting each step. Rejects with ServerSetupError. */
-export async function setupServer(options: SshCommandOptions & { bundle: AgentBundle; nodeCandidates?: string[]; onProgress?: SetupProgress }): Promise<ProbeResult> {
+export async function setupServer(options: SshCommandOptions & { bundle: AgentBundle; nodeCandidates?: string[]; shellSeconds?: number; onProgress?: SetupProgress }): Promise<ProbeResult> {
   const step = async <T>(id: Exclude<ServerSetupStep, 'save'>, work: () => Promise<T>): Promise<T> => {
     options.onProgress?.(id, 'running');
     try { const value = await work(); options.onProgress?.(id, 'done'); return value; } catch (error) { options.onProgress?.(id, 'failed'); throw error; }

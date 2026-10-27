@@ -7,7 +7,7 @@ import type test from 'node:test';
 import type { SshCommandOptions } from '../src/main/remote/installer';
 
 // Stands in for ssh: special hosts fail like ssh does; any other host runs the remote command through `sh -c` (like the
-// remote login shell) with HOME and PATH from fake.json, after printing a banner to stdout. Calls are logged to calls.jsonl.
+// remote login shell) with HOME, PATH, SHELL and extra variables from fake.json, after printing a banner to stdout. Calls are logged to calls.jsonl.
 const FAKE_SSH = `
 const fs = require('node:fs'), path = require('node:path');
 const args = process.argv.slice(2);
@@ -18,12 +18,12 @@ if (host === 'auth') fail('Warning: Permanently added x\\nalice@auth: Permission
 if (host === 'hostkey') fail((args.includes('-v') ? 'debug1: Server host key: ssh-ed25519 SHA256:abcDEF123\\n' : '') + 'No ED25519 host key is known for hostkey and you have requested strict checking.\\nHost key verification failed.\\n');
 if (host === 'changed') fail('@@@@@@@@\\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\\nHost key verification failed.\\n');
 if (host === 'down') fail('ssh: Could not resolve hostname down: Name or service not known\\n');
-const { home, bin } = JSON.parse(fs.readFileSync(path.join(__dirname, 'fake.json'), 'utf8'));
+const { home, bin, shell = '', env = {} } = JSON.parse(fs.readFileSync(path.join(__dirname, 'fake.json'), 'utf8'));
 process.stdout.write('Welcome to the fake server!\\nagent-monitor-probe-0000 node=99.0.0 /evil\\n');
-require('node:child_process').spawn('/bin/sh', ['-c', args.slice(args.indexOf('--') + 2).join(' ')], { stdio: 'inherit', env: { HOME: home, PATH: bin, SHELL: '' } })
+require('node:child_process').spawn('/bin/sh', ['-c', args.slice(args.indexOf('--') + 2).join(' ')], { stdio: 'inherit', env: { HOME: home, PATH: bin, SHELL: shell, ...env } })
   .on('exit', code => process.exit(code ?? 1));
 `;
-const TOOLS = ['sh', 'uname', 'cat', 'mkdir', 'chmod', 'mv', 'rm', 'tail', 'sha256sum', 'shasum', 'openssl'];
+const TOOLS = ['sh', 'uname', 'cat', 'mkdir', 'chmod', 'mv', 'rm', 'tail', 'sha256sum', 'shasum', 'openssl', 'mktemp', 'sed', 'sleep', 'env'];
 
 /** A fake ssh plus a temp HOME and minimal PATH standing in for a server (installer and server manager tests). */
 export async function fixture(t: test.TestContext) {
@@ -49,6 +49,12 @@ export async function fixture(t: test.TestContext) {
     await writeFile(file, `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
     return file;
   };
-  return { dir, home, bin, bundle, options, calls, fakeNode, candidates: ['"$HOME"/.nvm/versions/node/*/bin/node'] };
+  /** Makes `script` (a /bin/sh script body) the server's login shell and adds `env` to the session's environment. */
+  const loginShell = async (script: string, env: Record<string, string> = {}) => {
+    const shell = path.join(dir, 'login-shell');
+    await writeFile(shell, `#!/bin/sh\n${script}`, { mode: 0o755 });
+    await writeFile(path.join(dir, 'fake.json'), JSON.stringify({ home, bin, shell, env }));
+  };
+  return { dir, home, bin, bundle, options, calls, fakeNode, loginShell, candidates: ['"$HOME"/.nvm/versions/node/*/bin/node'] };
 }
 

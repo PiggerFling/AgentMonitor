@@ -1,25 +1,18 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
-import { TraceMonitor } from './trace-monitor/TraceMonitor';
-import { HermesMonitor } from './trace-monitor/HermesMonitor';
 import { MultiSourceMonitor } from './trace-monitor/MultiSourceMonitor';
 import { ConfigErrorSource, loadServersConfig, serversConfigPath } from './remote/config';
 import { loadAgentBundle } from './remote/agentBundle';
 import { ServerManager } from './remote/serverManager';
 import { ServersStore } from './remote/serversStore';
 import { loadSshHosts } from './remote/sshConfig';
+import { SettingsManager, SettingsStore, settingsPath } from './settings';
 
 let window: BrowserWindow | null = null;
-const idle = Number(process.env.AGENT_MONITOR_IDLE_MS);
-const fileMonitor = new TraceMonitor({
-  ...(process.env.AGENT_MONITOR_TRACE_ROOT ? {roots: [path.resolve(process.env.AGENT_MONITOR_TRACE_ROOT)]} : {}),
-  ...(Number.isFinite(idle) && idle > 0 ? {idleMs: idle} : {}),
-});
 const remotes = loadServersConfig(app.getPath('userData'));
-const monitor = new MultiSourceMonitor([
-  ...(process.env.AGENT_MONITOR_TRACE_ROOT ? [] : [new HermesMonitor(Number.isFinite(idle) && idle > 0 ? {idleMs:idle} : {})]),
-  fileMonitor,
-]);
+const monitor = new MultiSourceMonitor([]);
+// Local watchers (Hermes database and trace files) follow settings.json and restart when it changes.
+const settings = new SettingsManager({ monitor, store: new SettingsStore(settingsPath(app.getPath('userData'))) }, remotes.errors);
 // Remote servers, including ones added and removed from the app; managed servers must run exactly the bundled agent.
 const servers = new ServerManager({
   monitor,
@@ -28,7 +21,7 @@ const servers = new ServerManager({
   sshHosts: () => loadSshHosts(),
   onProgress: progress => { if (window && !window.webContents.isDestroyed()) window.webContents.send('servers:progress', progress); },
 });
-const serversLoaded = servers.load(remotes.servers, remotes.errors).then(async () => {
+const serversLoaded = settings.load().then(() => servers.load(remotes.servers, remotes.errors)).then(async () => {
   if (remotes.errors.length) await monitor.addSource(new ConfigErrorSource(remotes.errors));
 });
 const developmentUrl = process.env.VITE_DEV_SERVER_URL;
@@ -70,7 +63,12 @@ else {
       return monitor.loadRun(runId);
     });
     ipcMain.handle('servers:list-ssh-hosts', event => { assertSender(event); return servers.listSshHosts(); });
+    ipcMain.handle('servers:list', event => { assertSender(event); return servers.listServers(); });
+    ipcMain.handle('servers:probe', (event, request: unknown) => { assertSender(event); return servers.probeServer(request); });
     ipcMain.handle('servers:add', (event, request: unknown) => { assertSender(event); return servers.addServer(request); });
+    ipcMain.handle('servers:update', (event, request: unknown) => { assertSender(event); return servers.updateServer(request); });
+    ipcMain.handle('settings:get', event => { assertSender(event); return settings.get(); });
+    ipcMain.handle('settings:update', (event, request: unknown) => { assertSender(event); return settings.update(request); });
     ipcMain.handle('servers:remove', (event, request: unknown) => { assertSender(event); return servers.removeServer(request); });
     monitor.on('snapshot', snapshot => { if (window && !window.webContents.isDestroyed()) window.webContents.send('monitor:changed', snapshot); });
     // Unpackaged macOS runs show Electron's own Dock icon unless it is replaced; packaged apps use the bundle icon.

@@ -23,7 +23,8 @@ test('setup picks the newest node >= 22.12, uploads the agent and writes its bar
   await symlink(process.execPath, real);
   const progress: string[] = [];
   const result = await setupServer({ ...f.options('ok', { sshArgs: ['-J', 'bastion'], acceptNewHostKey: true }), bundle: f.bundle, nodeCandidates: f.candidates, onProgress: (step, state) => progress.push(`${step}:${state}`) });
-  assert.deepEqual(result, { home: f.home, os: os.platform() === 'darwin' ? 'Darwin' : 'Linux', arch: os.machine(), nodePath: real, nodeVersion: process.versions.node });
+  const detected = { claude: `${f.home}/.claude`, codex: `${f.home}/.codex`, pi: `${f.home}/.pi/agent`, hermes: `${f.home}/.hermes` };
+  assert.deepEqual(result, { home: f.home, os: os.platform() === 'darwin' ? 'Darwin' : 'Linux', arch: os.machine(), nodePath: real, nodeVersion: process.versions.node, detected, present: [] });
   assert.deepEqual(progress, ['probe:running', 'probe:done', 'install:running', 'install:done']);
   const dir = path.join(f.home, '.agent-monitor');
   assert.equal(await readFile(path.join(dir, 'agent.cjs'), 'utf8'), "console.log('agent');\n");
@@ -74,4 +75,28 @@ test('only Linux and macOS servers are supported', posixOnly, async t => {
   await rm(path.join(f.bin, 'uname'));
   await writeFile(path.join(f.bin, 'uname'), '#!/bin/sh\necho FreeBSD\n', { mode: 0o755 });
   await assert.rejects(probeServer({ ...f.options('ok'), nodeCandidates: f.candidates }), rejectsWith('unsupported-os', error => assert.match(error.message, /FreeBSD/)));
+});
+
+test('the probe reads data directories from the interactive login shell, past its banner', posixOnly, async t => {
+  const f = await fixture(t);
+  await symlink(process.execPath, path.join(f.bin, 'node'));
+  // Like ~/.zshrc: exported only in interactive shells, after rc output that looks like a variable.
+  await f.loginShell(`echo "CODEX_HOME=/banner/noise"\ncase "$1" in -i*) export CODEX_HOME="$HOME/.config/codex/" HERMES_HOME=relative;; esac\nexec /bin/sh -c "$2"\n`, { PI_CODING_AGENT_DIR: '/opt/pi' });
+  await mkdir(path.join(f.home, '.config', 'codex'), { recursive: true });
+  await mkdir(path.join(f.home, '.claude'));
+  const result = await probeServer({ ...f.options('ok'), nodeCandidates: [] });
+  // The session's own variable is used when the interactive shell has none; unusable values fall back to the default.
+  assert.deepEqual(result.detected, { claude: `${f.home}/.claude`, codex: `${f.home}/.config/codex`, pi: '/opt/pi', hermes: `${f.home}/.hermes` });
+  assert.deepEqual(result.present, ['claude', 'codex']);
+});
+
+test('a login shell that hangs is killed and the probe falls back to defaults', posixOnly, async t => {
+  const f = await fixture(t);
+  await symlink(process.execPath, path.join(f.bin, 'node'));
+  await f.loginShell('exec sleep 30\n');
+  const started = Date.now();
+  const result = await probeServer({ ...f.options('ok'), nodeCandidates: [], shellSeconds: 1 });
+  assert.ok(Date.now() - started < 10_000);
+  assert.equal(result.nodePath, path.join(f.bin, 'node'));
+  assert.equal(result.detected.codex, `${f.home}/.codex`);
 });

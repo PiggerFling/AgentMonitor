@@ -1,10 +1,19 @@
-import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import type { TraceDirs, TraceTool } from '../../shared/types';
+import { writeFileAtomic } from '../atomicFile';
 import { parseServersConfig, type ServerConfig } from './config';
 
 type RawEntry = Record<string, unknown>;
 interface RawFile { servers: unknown[]; [key: string]: unknown }
+/** Editable fields of an entry; see ServersStore.update. */
+export interface ServerChanges { label?: string; sshArgs?: string[]; tools?: TraceTool[]; traceDirs?: TraceDirs }
+
+/** The entry as parsed, or throws with the reason it is invalid. */
+function parsed(entry: RawEntry): ServerConfig {
+  const result = parseServersConfig({ servers: [entry] });
+  if (!result.servers[0]) throw new Error(result.errors[0]?.replace(/^servers\.json: server #1 (\(.*?\) )?skipped: /, '') ?? 'invalid server entry');
+  return result.servers[0];
+}
 
 /** Turns an ssh alias into a servers.json id: invalid characters become "-", at most 64 characters, "-2", "-3"... when taken. */
 export function serverIdFor(alias: string, taken: Iterable<string>): string {
@@ -27,16 +36,37 @@ export class ServersStore {
 
   constructor(readonly file: string) {}
 
-  /** Adds a managed entry for `alias` with a fresh id and returns it as parsed. */
-  addManaged(entry: { alias: string; label?: string; home: string; nodePath: string }): Promise<ServerConfig> {
+  /** Adds a managed entry for `alias` with a fresh id and returns it as parsed. Empty optional fields are left out. */
+  addManaged(entry: { alias: string; home: string; nodePath: string } & ServerChanges): Promise<ServerConfig> {
     return this.edit(raw => {
       const id = serverIdFor(entry.alias, raw.servers.map(server => (server as RawEntry | null)?.id).filter((id): id is string => typeof id === 'string'));
-      const added = { id, ...(entry.label ? { label: entry.label } : {}), ssh: entry.alias, managed: true, home: entry.home, nodePath: entry.nodePath };
-      const parsed = parseServersConfig({ servers: [added] });
-      if (!parsed.servers[0]) throw new Error(parsed.errors[0] ?? 'invalid server entry');
+      const { label, sshArgs, tools, traceDirs } = entry;
+      const added = { id, ...(label ? { label } : {}), ssh: entry.alias, ...(sshArgs?.length ? { sshArgs } : {}), managed: true, home: entry.home, nodePath: entry.nodePath,
+        ...(tools ? { tools } : {}), ...(traceDirs && Object.keys(traceDirs).length ? { traceDirs } : {}) };
+      const server = parsed(added);
       raw.servers.push(added);
-      return parsed.servers[0];
+      return server;
     });
+  }
+
+  /**
+   * Applies `changes` to the entry with `id`: each key present replaces that field, and an undefined value (or an empty
+   * label or sshArgs) removes it, i.e. restores its default. Other fields are kept. Returns the entry as parsed, or
+   * undefined (file untouched) when there is none; throws when the result would be invalid.
+   */
+  update(id: string, changes: ServerChanges): Promise<ServerConfig | undefined> {
+    return this.edit(raw => {
+      const index = raw.servers.findIndex(server => (server as RawEntry | null)?.id === id);
+      if (index < 0) return undefined;
+      const next: RawEntry = { ...raw.servers[index] as RawEntry };
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === undefined || value === '' || (Array.isArray(value) && !value.length && key === 'sshArgs')) delete next[key];
+        else next[key] = value;
+      }
+      const server = parsed(next);
+      raw.servers[index] = next;
+      return server;
+    }, server => server !== undefined);
   }
 
   /** Removes the entry with `id` and returns it, or undefined (file untouched) when there is none. */
@@ -72,15 +102,5 @@ export class ServersStore {
     return raw as RawFile;
   }
 
-  private async write(raw: RawFile): Promise<void> {
-    await mkdir(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-    try {
-      await writeFile(temp, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
-      await rename(temp, this.file);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
-  }
+  private write(raw: RawFile): Promise<void> { return writeFileAtomic(this.file, `${JSON.stringify(raw, null, 2)}\n`); }
 }

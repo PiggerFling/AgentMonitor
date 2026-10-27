@@ -2,13 +2,15 @@ import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { AGENT_DEFAULT_PORT } from '../../shared/remoteProtocol';
-import type { MonitorSnapshot } from '../../shared/types';
+import type { MonitorSnapshot, TraceDirs, TraceTool } from '../../shared/types';
+import { parseTraceSourceOptions } from '../trace-monitor/traceSources';
 
 /**
  * One servers.json entry. `managed` is set for servers the app installed the agent on (`"managed": true` with
- * `home` and `nodePath` in the file); the agent then starts per connection and `remotePort` is unused.
+ * `home` and `nodePath` in the file); the agent then starts per connection and `remotePort` is unused. `tools` and
+ * `traceDirs` (normalized, see parseTraceSourceOptions) are passed to a managed agent; manual agents take their own flags.
  */
-export interface ServerConfig { id: string; label: string; ssh: string; remotePort: number; sshArgs: string[]; managed?: { home: string; nodePath: string } }
+export interface ServerConfig { id: string; label: string; ssh: string; remotePort: number; sshArgs: string[]; managed?: { home: string; nodePath: string }; tools?: TraceTool[]; traceDirs?: TraceDirs }
 export interface ServersConfig { servers: ServerConfig[]; errors: string[] }
 
 /** Allowed servers.json ids. */
@@ -28,6 +30,10 @@ export function sshDestinationProblem(ssh: unknown): string | undefined {
  * backslashes (fish treats them as escapes inside single quotes) or control characters.
  */
 export const validRemotePath = (value: unknown): value is string => typeof value === 'string' && value.startsWith('/') && value.length > 1 && !value.includes("'") && !value.includes('\\') && !CONTROL.test(value);
+
+const PATH_RULE = 'an absolute POSIX path without quotes, backslashes or control characters';
+/** Validates and normalizes an entry's `tools` and `traceDirs`; the directories end up in the managed remote command. */
+export const parseServerTraceOptions = (value: { tools?: unknown; traceDirs?: unknown }) => parseTraceSourceOptions(value, validRemotePath, PATH_RULE);
 
 export function serversConfigPath(userDataDir: string, env: NodeJS.ProcessEnv = process.env): string {
   return env.AGENT_MONITOR_SERVERS_FILE ? path.resolve(env.AGENT_MONITOR_SERVERS_FILE) : path.join(userDataDir, 'servers.json');
@@ -63,6 +69,7 @@ export function parseServersConfig(raw: unknown, source = 'servers.json'): Serve
     if (problem) { errors.push(`${name}${typeof id === 'string' && ID.test(id) ? ` (${id})` : ''} skipped: ${problem}`); return; }
     const value = entry as Record<string, unknown>;
     ids.add(value.id as string);
+    const traceOptions = parseServerTraceOptions(value);
     servers.push({
       id: value.id as string,
       label: typeof value.label === 'string' && value.label.trim() ? value.label.trim() : value.id as string,
@@ -70,6 +77,7 @@ export function parseServersConfig(raw: unknown, source = 'servers.json'): Serve
       remotePort: value.remotePort === undefined ? AGENT_DEFAULT_PORT : value.remotePort as number,
       sshArgs: [...(value.sshArgs as string[] | undefined ?? [])],
       ...(value.managed === true ? { managed: { home: value.home as string, nodePath: value.nodePath as string } } : {}),
+      ...('options' in traceOptions ? traceOptions.options : {}),
     });
   });
   return { servers, errors };
@@ -89,9 +97,10 @@ function validate(entry: unknown, ids: Set<string>): string | undefined {
   for (const [key, value] of [['home', home], ['nodePath', nodePath]] as const) {
     if (value === undefined) { if (managed) return `"${key}" is required when "managed" is true`; continue; }
     // Interpolated into the remote shell command, single-quoted.
-    if (!validRemotePath(value)) return `"${key}" must be an absolute POSIX path without quotes, backslashes or control characters`;
+    if (!validRemotePath(value)) return `"${key}" must be ${PATH_RULE}`;
   }
-  return undefined;
+  const traceOptions = parseServerTraceOptions(entry as Record<string, unknown>);
+  return 'problem' in traceOptions ? traceOptions.problem : undefined;
 }
 
 /** A source with no runs that only reports servers.json problems, so they show up beside other monitor errors. */

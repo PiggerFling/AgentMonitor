@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { watch, type FSWatcher } from 'chokidar';
@@ -13,6 +12,7 @@ import {
 } from '../../traces/registry';
 import type { CodexObservation, TraceRecord } from '../../traces/codex';
 import { UsageAccumulator } from '../../traces/usage-accounting';
+import { traceRoots } from './traceSources';
 
 export interface TraceMonitorOptions {
   roots?: string[];
@@ -256,7 +256,7 @@ export class TraceMonitor extends EventEmitter {
 
   constructor(options: TraceMonitorOptions = {}) {
     super();
-    this.roots = (options.roots !== undefined ? options.roots : defaultTraceRoots()).map((root) => path.resolve(root));
+    this.roots = (options.roots !== undefined ? options.roots : traceRoots()).map((root) => path.resolve(root));
     this.idleMs = Number.isFinite(options.idleMs) && (options.idleMs ?? 0) > 0 ? options.idleMs as number : 30_000;
   }
 
@@ -1178,24 +1178,6 @@ export class TraceMonitor extends EventEmitter {
     if (this.errors.length > MAX_MONITOR_ERRORS) this.errors.splice(0, this.errors.length - MAX_MONITOR_ERRORS);
     if (publish) this.publishSnapshot();
   }
-}
-
-function childRoot(base: string | undefined, fallbackBase: string, child: string): string {
-  const root = base || fallbackBase;
-  return path.basename(root) === child ? root : path.join(root, child);
-}
-
-function defaultTraceRoots(): string[] {
-  const home = os.homedir();
-  const codexRoot = childRoot(process.env.CODEX_HOME, path.join(home, '.codex'), 'sessions');
-  const claudeRoot = childRoot(process.env.CLAUDE_CONFIG_DIR, path.join(home, '.claude'), 'projects');
-  const piRoot = childRoot(process.env.PI_CODING_AGENT_DIR, path.join(home, '.pi', 'agent'), 'sessions');
-  const hermesHome = process.env.HERMES_HOME || path.join(home, '.hermes');
-  const hermesRoots = [
-    path.join(hermesHome, 'session-exports', 'traces'),
-    path.join(hermesHome, 'sessions'),
-  ];
-  return Array.from(new Set([codexRoot, claudeRoot, piRoot, ...hermesRoots]));
 }
 
 function formatError(error: unknown): string {

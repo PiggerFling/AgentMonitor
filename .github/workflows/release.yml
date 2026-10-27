@@ -50,15 +50,55 @@ jobs:
       - name: Package
         run: npm run build && npx electron-builder ${{ matrix.args }} --publish never
 
-      - uses: actions/upload-artifact@v7
+      # One artifact per installer, uploaded unzipped and named after the file,
+      # so each can be downloaded on its own. archive: false takes a single file.
+      - name: Upload macOS arm64 dmg
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
         with:
-          name: release-${{ matrix.name }}
+          path: release/*-mac-arm64.dmg
+          archive: false
           if-no-files-found: error
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
-            release/*.AppImage
+
+      - name: Upload macOS x64 dmg
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-mac-x64.dmg
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload macOS arm64 zip
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-mac-arm64.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload macOS x64 zip
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-mac-x64.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload Linux AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*.AppImage
+          archive: false
+          if-no-files-found: error
 
   publish:
     name: Publish release
@@ -81,7 +121,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
-          pattern: release-*
+          pattern: agent-monitor-*
           merge-multiple: true
 
       - name: Create GitHub release

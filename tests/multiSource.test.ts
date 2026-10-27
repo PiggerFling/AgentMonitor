@@ -33,3 +33,61 @@ test('selection across file/database sources releases prior traces and preserves
   assert.equal(monitor.snapshot().runs.length,2);
   await monitor.stop();
 });
+
+class Tracked extends Source {
+  started = 0; stopped = 0;
+  async start() { this.started++; }
+  async stop() { this.stopped++; }
+}
+
+test('sources added at runtime start when the monitor runs and show up in snapshots', async () => {
+  const files=new Tracked('claude:a','claude');
+  const monitor=new MultiSourceMonitor([files]);
+  const early=new Tracked('codex:early','codex');
+  await monitor.addSource(early);
+  assert.equal(early.started,0);
+  await monitor.start();
+  assert.equal(early.started,1);
+  let snapshots=0;
+  monitor.on('snapshot',()=>snapshots++);
+  const late=new Tracked('hermes:late','hermes');
+  await monitor.addSource(late);
+  await monitor.addSource(late);
+  assert.equal(late.started,1);
+  assert.ok(snapshots>0);
+  assert.deepEqual(monitor.snapshot().runs.map(run=>run.id).sort(),['claude:a','codex:early','hermes:late']);
+  // Its own snapshot events are relayed.
+  snapshots=0; late.emit('snapshot');
+  assert.equal(snapshots,1);
+  await monitor.loadRun('hermes:late');
+  assert.deepEqual(monitor.snapshot().agents.map(a=>a.id),['hermes:late']);
+  await monitor.stop();
+  assert.equal(late.stopped,1);
+});
+
+test('removing a source stops it, detaches it, and clears the selection it held', async () => {
+  const files=new Tracked('claude:a','claude');
+  const remote=new Tracked('remote:x','codex');
+  const other=new Tracked('remote:y','codex');
+  const monitor=new MultiSourceMonitor([files,remote,other]);
+  await monitor.start();
+  await monitor.loadRun('remote:x');
+  await monitor.removeSource(other);
+  assert.equal(other.stopped,1);
+  assert.equal(monitor.snapshot().selectedRunId,'remote:x');
+  await monitor.removeSource(remote);
+  assert.equal(remote.stopped,1);
+  assert.equal(remote.selected,undefined);
+  const snapshot=monitor.snapshot();
+  assert.equal(snapshot.selectedRunId,undefined);
+  assert.deepEqual(snapshot.agents,[]);
+  assert.deepEqual(snapshot.runs.map(run=>run.id),['claude:a']);
+  let snapshots=0;
+  monitor.on('snapshot',()=>snapshots++);
+  remote.emit('snapshot');
+  assert.equal(snapshots,0);
+  await monitor.removeSource(remote);
+  await assert.rejects(monitor.loadRun('remote:x'),/Unknown trace run/);
+  await monitor.stop();
+  assert.equal(remote.stopped,1);
+});

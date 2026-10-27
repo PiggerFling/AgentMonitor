@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { loadAgentBundle } from '../src/main/remote/agentBundle';
 import { ConfigErrorSource, loadServersConfig, parseServersConfig } from '../src/main/remote/config';
 import { AGENT_DEFAULT_PORT } from '../src/shared/remoteProtocol';
 
@@ -63,4 +65,51 @@ test('config errors surface as monitor errors without runs', async () => {
   const source = new ConfigErrorSource(['bad entry']);
   assert.deepEqual(source.snapshot(), { runs: [], agents: [], edges: [], errors: ['bad entry'], watching: false });
   await assert.rejects(source.loadRun('x'));
+});
+
+test('managed entries carry home and nodePath; legacy entries have no managed field', () => {
+  const { servers, errors } = parseServersConfig({ servers: [
+    { id: 'm', ssh: 'm', managed: true, home: '/home/u', nodePath: '/home/u/.nvm/versions/node/v22.12.0/bin/node' },
+    { id: 'off', ssh: 'off', managed: false },
+  ] });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(servers[0], { id: 'm', label: 'm', ssh: 'm', remotePort: AGENT_DEFAULT_PORT, sshArgs: [],
+    managed: { home: '/home/u', nodePath: '/home/u/.nvm/versions/node/v22.12.0/bin/node' } });
+  assert.equal('managed' in servers[1], false);
+});
+
+test('managed entries need absolute, quote-free remote paths', () => {
+  const ok = { ssh: 'h', managed: true, home: '/home/u', nodePath: '/usr/bin/node' };
+  const { servers, errors } = parseServersConfig({ servers: [
+    { ...ok, id: 'flag', managed: 'yes' },
+    { ...ok, id: 'nohome', home: undefined },
+    { ...ok, id: 'nonode', nodePath: undefined },
+    { ...ok, id: 'relative', home: 'home/u' },
+    { ...ok, id: 'quote', nodePath: "/opt/o'node/bin/node" },
+    { ...ok, id: 'ctl', home: '/home/u\n' },
+    { ...ok, id: 'colon', home: '/home/a:b' },
+    { ...ok, id: 'type', nodePath: 7 },
+    { ...ok, id: 'backslash', nodePath: '/opt/a\\b/node' },
+    { ...ok, id: 'spaces', home: '/home/my user', nodePath: '/opt/node 22/bin/node' },
+  ] });
+  assert.deepEqual(servers.map(server => server.id), ['spaces']);
+  assert.equal(errors.length, 9);
+  assert.match(errors[0], /\(flag\) skipped: "managed" must be true or false/);
+  assert.match(errors[1], /\(nohome\) skipped: "home" is required/);
+  assert.match(errors[2], /\(nonode\) skipped: "nodePath" is required/);
+  for (const error of errors.slice(3)) assert.match(error, /"(home|nodePath)" must be an absolute POSIX path/);
+});
+
+test('the bundled agent is found in resources when packaged and in dist-agent in development', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'agent-bundle-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(path.join(dir, 'dist-agent'));
+  await mkdir(path.join(dir, 'resources'));
+  await writeFile(path.join(dir, 'dist-agent', 'agent.cjs'), 'dev');
+  await writeFile(path.join(dir, 'resources', 'agent.cjs'), 'packaged');
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+  const options = { resourcesPath: path.join(dir, 'resources'), mainDir: path.join(dir, 'dist-electron') };
+  assert.deepEqual(loadAgentBundle({ ...options, packaged: false }), { path: path.join(dir, 'dist-agent', 'agent.cjs'), sha256: sha('dev') });
+  assert.deepEqual(loadAgentBundle({ ...options, packaged: true }), { path: path.join(dir, 'resources', 'agent.cjs'), sha256: sha('packaged') });
+  assert.throws(() => loadAgentBundle({ ...options, mainDir: dir, packaged: false }), /ENOENT/);
 });

@@ -1,6 +1,7 @@
 import { app } from './app';
 import { common } from './common';
 import { remote } from './remote';
+import { servers } from './servers';
 import { tokens } from './tokens';
 import { trace } from './trace';
 import { ui } from './ui';
@@ -12,6 +13,7 @@ export const en = {
   trace,
   tokens,
   remote,
+  servers,
 };
 
 /** Every locale must provide the same shape as English; plural entries only need `other`. */

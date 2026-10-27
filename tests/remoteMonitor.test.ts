@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { RemoteMonitor } from '../src/main/trace-monitor/RemoteMonitor';
 import { MultiSourceMonitor } from '../src/main/trace-monitor/MultiSourceMonitor';
+import { AgentOutdatedError } from '../src/main/remote/sshTunnel';
 import { AGENT_PROTOCOL_VERSION, type RemoteEndpoint } from '../src/shared/remoteProtocol';
 import type { Agent, MonitorSnapshot } from '../src/shared/types';
 
@@ -194,4 +195,50 @@ test('integrates with MultiSourceMonitor', async () => {
   assert.deepEqual(multi.snapshot().edges.map(e => e.id),[`${P}a->b`]);
   await multi.stop();
   await fake.close();
+});
+
+test('an outdated managed agent is reinstalled once, then the connection is retried at once', async () => {
+  const fake = new FakeAgent();
+  const url = await fake.listen();
+  let installed = false, reinstalls = 0, opens = 0;
+  const ep: RemoteEndpoint = { async open() { opens++; if (!installed) throw new AgentOutdatedError('srv'); return url; }, async close() {} };
+  const monitor = new RemoteMonitor({id:'srv',label:'box',endpoint:ep,retry:{minMs:60_000,maxMs:60_000},reinstall: async () => { reinstalls++; installed = true; }});
+  await monitor.start();
+  // A 60s backoff would time out here: the retry after reinstalling does not wait.
+  await until(() => monitor.snapshot().remotes![0].state === 'connected');
+  assert.deepEqual([reinstalls,opens],[1,2]);
+  await monitor.stop();
+  await fake.close();
+});
+
+test('a failing reinstall is reported and tried at most once per backoff cycle', async () => {
+  let reinstalls = 0, opens = 0;
+  const ep: RemoteEndpoint = { async open() { opens++; throw new AgentOutdatedError('srv'); }, async close() {} };
+  const monitor = new RemoteMonitor({id:'srv',label:'box',endpoint:ep,retry:{minMs:40,maxMs:40},reinstall: async () => { reinstalls++; throw new Error('Node.js is gone'); }});
+  await monitor.start();
+  await until(() => monitor.snapshot().remotes![0].state === 'error');
+  assert.match(monitor.snapshot().remotes![0].error!,/missing or outdated and reinstalling it failed: Node.js is gone/);
+  await new Promise(r => setTimeout(r,150));
+  await monitor.stop();
+  assert.ok(reinstalls >= 2 && reinstalls <= 5, `reinstalls ${reinstalls}`);
+  assert.equal(opens,reinstalls);
+  // A reinstall that succeeds without fixing the agent does not loop either.
+  let ok = 0;
+  const stubborn = new RemoteMonitor({id:'srv',label:'box',endpoint:ep,retry:{minMs:60_000,maxMs:60_000},reinstall: async () => { ok++; }});
+  await stubborn.start();
+  await until(() => stubborn.snapshot().remotes![0].state === 'error');
+  await new Promise(r => setTimeout(r,50));
+  assert.equal(ok,1);
+  assert.match(stubborn.snapshot().remotes![0].error!,/missing or outdated/);
+  await stubborn.stop();
+});
+
+test('stop does not wait for a reinstall in progress', async () => {
+  let aborted = false;
+  const ep: RemoteEndpoint = { async open() { throw new AgentOutdatedError('srv'); }, async close() {} };
+  const monitor = new RemoteMonitor({id:'srv',label:'box',endpoint:ep,reinstall: signal => new Promise(() => { signal.addEventListener('abort',() => { aborted = true; }); })});
+  await monitor.start();
+  await new Promise(r => setTimeout(r,20));
+  await monitor.stop();
+  assert.equal(aborted,true);
 });

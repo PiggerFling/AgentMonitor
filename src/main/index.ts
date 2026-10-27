@@ -3,9 +3,11 @@ import path from 'node:path';
 import { TraceMonitor } from './trace-monitor/TraceMonitor';
 import { HermesMonitor } from './trace-monitor/HermesMonitor';
 import { MultiSourceMonitor } from './trace-monitor/MultiSourceMonitor';
-import { RemoteMonitor } from './trace-monitor/RemoteMonitor';
-import { ConfigErrorSource, loadServersConfig } from './remote/config';
-import { SshTunnel } from './remote/sshTunnel';
+import { ConfigErrorSource, loadServersConfig, serversConfigPath } from './remote/config';
+import { loadAgentBundle } from './remote/agentBundle';
+import { ServerManager } from './remote/serverManager';
+import { ServersStore } from './remote/serversStore';
+import { loadSshHosts } from './remote/sshConfig';
 
 let window: BrowserWindow | null = null;
 const idle = Number(process.env.AGENT_MONITOR_IDLE_MS);
@@ -17,9 +19,18 @@ const remotes = loadServersConfig(app.getPath('userData'));
 const monitor = new MultiSourceMonitor([
   ...(process.env.AGENT_MONITOR_TRACE_ROOT ? [] : [new HermesMonitor(Number.isFinite(idle) && idle > 0 ? {idleMs:idle} : {})]),
   fileMonitor,
-  ...remotes.servers.map(server => new RemoteMonitor({ id: server.id, label: server.label, endpoint: new SshTunnel(server) })),
-  ...(remotes.errors.length ? [new ConfigErrorSource(remotes.errors)] : []),
 ]);
+// Remote servers, including ones added and removed from the app; managed servers must run exactly the bundled agent.
+const servers = new ServerManager({
+  monitor,
+  store: new ServersStore(serversConfigPath(app.getPath('userData'))),
+  bundle: () => loadAgentBundle({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname }),
+  sshHosts: () => loadSshHosts(),
+  onProgress: progress => { if (window && !window.webContents.isDestroyed()) window.webContents.send('servers:progress', progress); },
+});
+const serversLoaded = servers.load(remotes.servers, remotes.errors).then(async () => {
+  if (remotes.errors.length) await monitor.addSource(new ConfigErrorSource(remotes.errors));
+});
 const developmentUrl = process.env.VITE_DEV_SERVER_URL;
 // Packaged apps ship the icon as an extra resource; development reads it from build/ (icon.icns and icon.ico sit beside it).
 const iconPath = app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '../build/icon.png');
@@ -58,11 +69,14 @@ else {
       if (typeof runId !== 'string' || !runId || runId.length > 1024) throw new Error('Invalid run identifier');
       return monitor.loadRun(runId);
     });
+    ipcMain.handle('servers:list-ssh-hosts', event => { assertSender(event); return servers.listSshHosts(); });
+    ipcMain.handle('servers:add', (event, request: unknown) => { assertSender(event); return servers.addServer(request); });
+    ipcMain.handle('servers:remove', (event, request: unknown) => { assertSender(event); return servers.removeServer(request); });
     monitor.on('snapshot', snapshot => { if (window && !window.webContents.isDestroyed()) window.webContents.send('monitor:changed', snapshot); });
     // Unpackaged macOS runs show Electron's own Dock icon unless it is replaced; packaged apps use the bundle icon.
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(iconPath);
     createWindow();
-    void monitor.start().catch(error => { console.error('Trace monitor failed:', error); });
+    void serversLoaded.then(() => monitor.start()).catch(error => { console.error('Trace monitor failed:', error); });
     app.on('activate', () => { if (!window) createWindow(); });
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

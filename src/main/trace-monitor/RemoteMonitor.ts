@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { MonitorSnapshot, RemoteHostStatus, TraceEntry } from '../../shared/types';
 import { AGENT_HEARTBEAT_MS, AGENT_PROTOCOL_VERSION, type AgentVersionInfo, type RemoteEndpoint } from '../../shared/remoteProtocol';
 import type { MonitorSource } from './MultiSourceMonitor';
+import { AgentOutdatedError } from '../remote/sshTunnel';
 
 export interface RemoteMonitorOptions {
   id: string;
@@ -11,6 +12,11 @@ export interface RemoteMonitorOptions {
   retry?: { minMs?: number; maxMs?: number };
   /** Abort the event stream when nothing (data or ping) arrives for this long. Default 2.5x AGENT_HEARTBEAT_MS. */
   staleMs?: number;
+  /**
+   * Reinstalls a managed server's agent after the endpoint reported it missing or outdated (AgentOutdatedError); the
+   * connection is retried right after a successful reinstall. Tried at most once per backoff cycle. `signal` aborts on stop.
+   */
+  reinstall?: (signal: AbortSignal) => Promise<void>;
 }
 
 /** Per-request limit for trace and load-run calls, so a hung tunnel surfaces as an error instead of a spinner. */
@@ -39,6 +45,7 @@ export class RemoteMonitor extends EventEmitter implements MonitorSource {
   private readonly maxMs: number;
   private readonly staleMs: number;
   private readonly prefix: string;
+  private readonly reinstall?: (signal: AbortSignal) => Promise<void>;
   private running = false;
   private life?: AbortController;
   private loop?: Promise<void>;
@@ -57,6 +64,7 @@ export class RemoteMonitor extends EventEmitter implements MonitorSource {
     this.maxMs = options.retry?.maxMs ?? 30_000;
     this.staleMs = options.staleMs ?? AGENT_HEARTBEAT_MS * 2.5;
     this.prefix = `remote:${this.id}::`;
+    this.reinstall = options.reinstall;
     this.status = { id:this.id,label:this.label,state:'connecting' };
   }
 
@@ -134,6 +142,7 @@ export class RemoteMonitor extends EventEmitter implements MonitorSource {
 
   private async run(life: AbortSignal): Promise<void> {
     let attempt = 0;
+    let reinstalled = false;
     while (!life.aborted) {
       try {
         await this.connect(life, () => { attempt = 0; });
@@ -141,9 +150,18 @@ export class RemoteMonitor extends EventEmitter implements MonitorSource {
       } catch (error) {
         if (life.aborted) return;
         this.base = undefined;
-        this.setStatus({ state:'error',error:message(error) });
+        if (error instanceof AgentOutdatedError && this.reinstall && !reinstalled) {
+          reinstalled = true;
+          this.setStatus({ state:'connecting',error:undefined });
+          const aborted = new Promise<'aborted'>(resolve => life.addEventListener('abort', () => resolve('aborted'), { once:true }));
+          const failure = await Promise.race([this.reinstall(life).then(() => undefined, (cause: unknown) => cause ?? new Error('reinstall failed')), aborted]);
+          if (life.aborted) return;
+          if (!failure) continue;
+          this.setStatus({ state:'error',error:`the agent is missing or outdated and reinstalling it failed: ${message(failure)}` });
+        } else this.setStatus({ state:'error',error:message(error) });
       }
       await wait(Math.min(this.maxMs, this.minMs * 2 ** attempt++), life);
+      reinstalled = false;
     }
   }
 

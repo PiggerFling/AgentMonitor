@@ -16,10 +16,36 @@ export class MultiSourceMonitor extends EventEmitter {
   private selectedSource?: MonitorSource;
   private generation = 0;
   private startPromise?: Promise<void>;
+  private readonly sources: MonitorSource[] = [];
+  private readonly relay = () => this.emit('snapshot', this.snapshot());
 
-  constructor(private readonly sources: MonitorSource[]) {
+  constructor(sources: MonitorSource[]) {
     super();
-    for (const source of sources) source.on('snapshot', () => this.emit('snapshot', this.snapshot()));
+    for (const source of sources) this.attach(source);
+  }
+
+  private attach(source: MonitorSource) {
+    this.sources.push(source);
+    source.on('snapshot', this.relay);
+  }
+
+  /** Adds a source at runtime; it is started right away when the monitor has been started. */
+  async addSource(source: MonitorSource): Promise<void> {
+    if (this.sources.includes(source)) return;
+    this.attach(source);
+    if (this.startPromise) await source.start();
+    this.relay();
+  }
+
+  /** Stops and drops a source; when it held the selected run, the selection is cleared. */
+  async removeSource(source: MonitorSource): Promise<void> {
+    const index = this.sources.indexOf(source);
+    if (index < 0) return;
+    if (this.selectedSource === source) this.unloadRun();
+    this.sources.splice(index, 1);
+    source.off('snapshot', this.relay);
+    await source.stop();
+    this.relay();
   }
 
   start(): Promise<void> {

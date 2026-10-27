@@ -9,4 +9,4 @@ Use **Expand trace** or **Open trace in tab** in the details panel to read entri
 
 The sidebar shows combined input/output totals for loaded runs. Click the graph's token totals to open a per-agent breakdown, aggregated IN/OUT totals, a tokens-per-minute chart, and cumulative usage. Live counters use rolling digits and respect reduced-motion settings.
 
-USD values use verified per-model API rates, including available cache and context-tier metadata. They are API-equivalent estimates, not subscription bills. Unknown models or incomplete usage remain unpriced and are disclosed in the breakdown. See [pricing sources and assumptions](token-pricing.md).
+USD values use each model's official API list price, including available cache and context-tier metadata; missing details are assumed and noted. They are API-equivalent estimates, not subscription bills. Only models without a list price remain unpriced, and the breakdown discloses them. See [pricing sources and assumptions](token-pricing.md).

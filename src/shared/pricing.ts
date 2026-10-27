@@ -1,58 +1,88 @@
 import type { Agent, ModelTokenUsage } from './types';
 
-export const PRICING_VERIFIED_AT = '2026-09-16';
-export const PRICING_SOURCES = ['https://developers.openai.com/api/docs/pricing','https://platform.claude.com/docs/en/about-claude/pricing','https://docs.x.ai/developers/pricing'];
+export const PRICING_VERIFIED_AT = '2026-10-28';
+export const PRICING_SOURCES = ['https://developers.openai.com/api/docs/pricing','https://platform.claude.com/docs/en/about-claude/pricing'];
 type Rate = { vendor:string; input:number; read:number; write?:number; write1h?:number; output:number; threshold?:number; thresholdInclusive?:boolean; long?:{input:number;read:number;write:number;output:number} };
 const rates:Record<string,Rate> = {};
-function openai(model:string,input:number,output:number) {
-  rates[model]={vendor:'openai',input,read:input/10,write:input*1.25,output,threshold:272000,long:{input:input*2,read:input/5,write:input*2.5,output:output*1.5}};
+/** OpenAI: cache writes 1.25x input; above 272K request input tokens the whole request costs 2x input and 1.5x output. */
+function openai(model:string,input:number,read:number,output:number) {
+  rates[model]={vendor:'openai',input,read,write:input*1.25,output,threshold:272000,long:{input:input*2,read:read*2,write:input*2.5,output:output*1.5}};
 }
-openai('gpt-6-astra',10,50);
-openai('gpt-5.6-sol',4,20);
-openai('gpt-5.6-terra',2,12);
-openai('gpt-5.6-luna',0.2,1.2);
-rates['gpt-5.5']={vendor:'openai',input:5,read:.5,output:30,threshold:272000,long:{input:10,read:1,write:0,output:45}};
-rates['gpt-5.5-2026-04-23']=rates['gpt-5.5'];
-for (const [model,input,output] of [
-  ['claude-fable-5',10,50],['claude-opus-5',5,25],['claude-sonnet-5',2,10],['claude-haiku-4-5-20251001',1,5],
-] as const) rates[model]={vendor:'anthropic',input,read:input*.1,write:input*1.25,write1h:input*2,output};
-for (const [model,read] of [['grok-4.6',.5],['grok-4.5',.3]] as const) rates[model]={vendor:'xai',input:2,read,output:6,threshold:200000,thresholdInclusive:true,long:{input:4,read:read*2,write:0,output:12}};
+openai('gpt-6-astra',10,1,50);
+openai('gpt-6.1-sol',2,.1,10);
+openai('gpt-6-sol',2,.2,10);
+openai('gpt-6.1-terra',1,.05,5);
+openai('gpt-6-luna',.1,.01,.5);
+openai('gpt-5.6-sol',4,.4,20);
+openai('gpt-5.6-terra',2,.2,12);
+openai('gpt-5.6-luna',.2,.02,1.2);
+openai('gpt-5.5',5,.5,30);
+/** Anthropic: 5-minute cache writes 1.25x input, 1-hour writes 2x; the 1M context costs the same per token throughout. */
+function anthropic(model:string,input:number,read:number,output:number,long?:{threshold:number;input:number;read:number;output:number}) {
+  rates[model]={vendor:'anthropic',input,read,write:input*1.25,write1h:input*2,output,
+    ...(long?{threshold:long.threshold,long:{input:long.input,read:long.read,write:long.input*1.25,output:long.output}}:{})};
+}
+anthropic('claude-fable-5-1',10,.25,50);
+anthropic('claude-opus-5-5',4,.2,20);
+anthropic('claude-sonnet-5-5',2,.1,10);
+// Haiku 5.5 prices requests above 100K input tokens at a higher tier.
+anthropic('claude-haiku-5-5',.1,.01,.5,{threshold:100000,input:.5,read:.05,output:2.5});
+anthropic('claude-fable-5',10,1,50);
+anthropic('claude-opus-5',5,.5,25);
+anthropic('claude-sonnet-5',2,.2,10);
+anthropic('claude-haiku-4-5',1,.1,5);
 
-/** Verified list rates in USD per 1M tokens, for display. `long` applies above `threshold` request input tokens. */
+/** The rates entry for a model id as traces record it: case, a `vendor/` prefix, a `[1m]` suffix or a date suffix do not matter. */
+function rateKey(model:string):string|undefined {
+  const name=model.trim().toLowerCase().replace(/^[\w.-]+\//,'').replace(/\[[^\]]*\]$/,'');
+  if(rates[name]) return name;
+  const undated=name.replace(/-(\d{8}|\d{4}-\d{2}-\d{2})$/,'');
+  return rates[undated]?undated:undefined;
+}
+/** The list rate a model is priced at, if any. */
+export function modelRate(model:string):Readonly<Rate>|undefined { const key=rateKey(model); return key?rates[key]:undefined; }
+
+/** List rates in USD per 1M tokens, for display. `long` applies above `threshold` request input tokens. */
 export type ModelPrice = Readonly<Rate> & { model: string };
 export function listModelPrices(): ModelPrice[] { return Object.entries(rates).map(([model,rate])=>({...rate,model})); }
 
 
 export interface CostEstimate { usd:number|null; knownUsd:number; complete:boolean; unpricedTokens:number; notes:string[] }
-function priceUsage(usage:ModelTokenUsage): {usd:number|null;note?:string} {
-  const rate=rates[usage.model];
-  if(!rate) return {usd:null,note:`No verified price for ${usage.model || 'unknown model'}.`};
-  if(usage.provider && ![rate.vendor,`${rate.vendor}-codex`,`${rate.vendor}-responses`,`${rate.vendor}-completions`, ...(rate.vendor==='xai'?['xai-oauth']:[])].includes(usage.provider.toLowerCase())) return {usd:null,note:`Unverified billing route: ${usage.provider}.`};
+/**
+ * Prices one usage bucket at the official API list price of its model, whatever route the tokens took. Missing details
+ * are assumed rather than refused: no cache counters means no caching, no TTL split means 5-minute writes, no request
+ * size means the base tier, and an unknown service tier means standard. Each assumption adds a note.
+ */
+function priceUsage(usage:ModelTokenUsage): {usd:number|null;notes:string[]} {
+  const rate=modelRate(usage.model);
+  if(!rate) return {usd:null,notes:[`No list price for ${usage.model || 'unknown model'}.`]};
   const values=[usage.inputTokens,usage.outputTokens,usage.cacheReadTokens,usage.cacheWriteTokens,usage.cacheWrite5mTokens,usage.cacheWrite1hTokens].filter(v=>v!==undefined);
-  if(values.some(v=>!Number.isFinite(v)||(v ?? 0)<0)) return {usd:null,note:'Invalid token counters.'};
-  if(usage.inputTokens && (usage.cacheReadTokens===undefined || usage.cacheWriteTokens===undefined)) return {usd:null,note:`Cache accounting is unavailable for ${usage.model}.`};
-  let selected:Rate=rate;
-  if(rate.threshold && usage.requestInputTokens===undefined && usage.inputTokens>=rate.threshold) return {usd:null,note:`Per-request context size is unavailable for ${usage.model}.`};
-  if(rate.threshold && ((usage.requestInputTokens??usage.inputTokens)>rate.threshold || (rate.thresholdInclusive && (usage.requestInputTokens??usage.inputTokens)===rate.threshold)) && rate.long) selected={...rate,...rate.long};
+  if(values.some(v=>!Number.isFinite(v)||(v ?? 0)<0)) return {usd:null,notes:['Invalid token counters.']};
+  const notes:string[]=[];
+  if(usage.inputTokens && (usage.cacheReadTokens===undefined || usage.cacheWriteTokens===undefined)) notes.push(`Cache counters are missing for ${usage.model}; counted as uncached input.`);
   const read=usage.cacheReadTokens??0, write=usage.cacheWriteTokens??0;
-  if(read+write>usage.inputTokens) return {usd:null,note:'Cached tokens exceed input total.'};
-  if(write && rate.write===undefined) return {usd:null,note:`Cache-write price unavailable for ${usage.model}.`};
-  let writeCost=write*(selected.write??0);
-  if(write && selected.write===undefined) return {usd:null,note:`Cache-write price unavailable for ${usage.model}.`};
+  if(read+write>usage.inputTokens) return {usd:null,notes:['Cached tokens exceed input total.']};
+  let selected:Rate=rate;
+  const requestInput=usage.requestInputTokens;
+  if(rate.threshold && rate.long) {
+    if(requestInput===undefined) { if(usage.inputTokens>rate.threshold) notes.push(`Per-request context size is unavailable for ${usage.model}; priced at the base tier.`); }
+    else if(requestInput>rate.threshold || (rate.thresholdInclusive && requestInput===rate.threshold)) selected={...rate,...rate.long};
+  }
+  let writeCost=write*(selected.write??selected.input);
   if(write && selected.write1h!==undefined) {
     const short=usage.cacheWrite5mTokens, long=usage.cacheWrite1hTokens;
-    if(short===undefined || long===undefined || short+long!==write) return {usd:null,note:`Cache-write lifetime is unavailable for ${usage.model}.`};
-    writeCost=short*selected.write!+long*selected.write1h;
+    if(short===undefined || long===undefined || short+long!==write) notes.push(`Cache-write lifetime is unavailable for ${usage.model}; priced as 5-minute writes.`);
+    else writeCost=short*selected.write!+long*selected.write1h;
   }
   const tier=usage.serviceTier?.toLowerCase();
   let multiplier=1;
-  if(tier && !['default','standard','auto'].includes(tier)) {
-    if(usage.model.startsWith('gpt-5.5')) return {usd:null,note:`Service-tier pricing is unverified for ${usage.model}.`};
-    if(['openai','xai'].includes(rate.vendor) && ['priority','fast'].includes(tier)) multiplier=2;
-    else if(rate.vendor==='openai' && ['flex','batch'].includes(tier)) multiplier=.5;
-    else return {usd:null,note:`Unverified service tier: ${tier}.`};
+  if(tier && !['default','standard','auto','standard_only'].includes(tier)) {
+    // OpenAI's priority processing and either vendor's fast mode cost 2x; Anthropic's Priority Tier bills at standard rates.
+    if(tier==='fast' || (tier==='priority' && rate.vendor==='openai')) multiplier=2;
+    else if(['flex','batch'].includes(tier)) multiplier=.5;
+    else if(tier!=='priority') notes.push(`Unknown service tier ${tier}; priced at standard rates.`);
   }
-  return {usd:((usage.inputTokens-read-write)*selected.input+read*selected.read+writeCost+usage.outputTokens*selected.output)*multiplier/1e6};
+  return {usd:((usage.inputTokens-read-write)*selected.input+read*selected.read+writeCost+usage.outputTokens*selected.output)*multiplier/1e6,notes};
 }
 
 /** Current API token-value estimate, never a subscription invoice or historical charge. */
@@ -64,7 +94,8 @@ export function estimateAgentCost(agent:Agent):CostEstimate {
   for(const usage of agent.tokenUsage??[]) {
     coveredInput+=usage.inputTokens; coveredOutput+=usage.outputTokens;
     const result=priceUsage(usage);
-    if(result.usd===null) {unpricedTokens+=usage.inputTokens+usage.outputTokens; if(result.note) notes.add(result.note);}
+    for(const note of result.notes) notes.add(note);
+    if(result.usd===null) unpricedTokens+=usage.inputTokens+usage.outputTokens;
     else knownUsd+=result.usd;
   }
   const missing=Math.max(0,agent.stats.inputTokens-coveredInput)+Math.max(0,agent.stats.outputTokens-coveredOutput);
@@ -101,7 +132,7 @@ export function estimateModelCosts(agents: readonly Agent[]): ModelCostRow[] {
   const rowFor = (model: string) => {
     let row = rows.get(model);
     if (!row) {
-      const rate = rates[model];
+      const rate = modelRate(model);
       row = { model, agents: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, knownUsd: 0, unpricedTokens: 0, complete: true, notes: [], agentIds: new Set(),
         ...(rate ? { rate: { input: rate.input, output: rate.output } } : {}) };
       rows.set(model, row);
@@ -130,10 +161,9 @@ export function estimateModelCosts(agents: readonly Agent[]): ModelCostRow[] {
       row.outputTokens += usage.outputTokens;
       row.cacheReadTokens += usage.cacheReadTokens ?? 0;
       const result = priceUsage(usage);
-      if (result.usd === null) {
-        row.unpricedTokens += usage.inputTokens + usage.outputTokens;
-        if (result.note) row.notes.push(result.note);
-      } else row.knownUsd += result.usd;
+      row.notes.push(...result.notes);
+      if (result.usd === null) row.unpricedTokens += usage.inputTokens + usage.outputTokens;
+      else row.knownUsd += result.usd;
     }
     const missingInput = Math.max(0, agent.stats.inputTokens - coveredInput);
     const missingOutput = Math.max(0, agent.stats.outputTokens - coveredOutput);

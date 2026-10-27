@@ -32,7 +32,7 @@ Default sources:
 
 ## Remote servers
 
-Monitor agents on other machines too: run the headless agent on each server (`npm run agent`, or copy the single file `dist-agent/agent.cjs`) and list the servers in `servers.json`. The app connects through SSH port forwards using your existing `~/.ssh/config` and keys; the agent listens on loopback only. See [Remote servers](docs/remote.md).
+Monitor agents on other machines too: pick a host from your `~/.ssh/config` in the app's Servers panel and the app installs a small headless agent there over SSH and runs it for each connection, using your existing keys. You can also run the agent yourself and list the server in `servers.json`. See [Remote servers](docs/remote.md).
 
 ## Trace view
 

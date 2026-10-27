@@ -1,8 +1,8 @@
 /**
  * Wire protocol between the headless agent (src/agent, one per server) and the desktop RemoteMonitor.
  *
- * The agent binds loopback only and is reached through an SSH local forward, so SSH provides encryption
- * and authentication. All bodies are JSON; errors are `{ "error": string }` with a 4xx/5xx status.
+ * The agent binds loopback only and is reached through an SSH local forward, or (managed servers) runs as the
+ * command of an SSH session and serves over its stdin/stdout, so SSH provides encryption and authentication. All bodies are JSON; errors are `{ "error": string }` with a 4xx/5xx status.
  *
  *   GET  /api/version               -> AgentVersionInfo
  *   GET  /api/snapshot              -> MonitorSnapshot

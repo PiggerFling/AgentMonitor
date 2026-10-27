@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import net from 'node:net';
+import type { Duplex } from 'node:stream';
 import { AGENT_DEFAULT_PORT, type RemoteEndpoint } from '../../shared/remoteProtocol';
+import { StreamMux } from '../../shared/streamMux';
 
 /** A server whose agent the app installed under `<home>/.agent-monitor`; the tunnel starts it per connection. */
 export interface ManagedAgent {
@@ -46,11 +47,18 @@ export function shellQuote(value: string): string { return `'${value.replaceAll(
  */
 export function remoteSh(script: string): string { return `sh -c ${shellQuote(script)}`; }
 
-/** The command line run by the remote login shell for a managed agent listening on `socket`. */
-export function managedRemoteCommand(managed: ManagedAgent, socket: string): string {
+/** The command line run by the remote login shell for a managed agent serving on its stdin/stdout. */
+export function managedRemoteCommand(managed: ManagedAgent): string {
   return remoteSh(`cd ${shellQuote(`${managed.home}/.agent-monitor`)} && [ "$(cat agent.sha256 2>/dev/null)" = ${shellQuote(managed.agentSha256)} ] || exit ${AGENT_OUTDATED_EXIT_CODE}; `
-    + `exec ${shellQuote(managed.nodePath)} agent.cjs --socket ${shellQuote(socket)} --exit-on-stdin-close`);
+    + `exec ${shellQuote(managed.nodePath)} agent.cjs --stdio`);
 }
+
+/**
+ * ssh options for a managed connection. It needs no port forwarding, so forwardings from ~/.ssh/config (e.g. a
+ * RemoteForward another tool added for interactive logins) are cleared rather than competing for their ports, and
+ * the escape character is off because stdin carries binary frames.
+ */
+export const MANAGED_SSH_OPTIONS = ['-T', '-e', 'none', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
 
 const live = new Set<ChildProcess>();
 let exitHookInstalled = false;
@@ -65,6 +73,13 @@ function track(child: ChildProcess) {
 
 const running = (child: ChildProcess) => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function listenLocal(server: net.Server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve((server.address() as net.AddressInfo).port); });
+  });
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -87,12 +102,14 @@ function accepts(port: number): Promise<boolean> {
 }
 
 /**
- * An `ssh -L` local forward to an agent on the server. Authentication relies on keys or ssh-agent (BatchMode).
- * Legacy mode forwards to a resident agent's loopback port (`ssh -N`). Managed mode runs the installed agent as the
- * ssh command on a fresh Unix socket and forwards to that; stdin stays open so the agent exits when ssh goes away.
+ * A local loopback URL for an agent on the server. Authentication relies on keys or ssh-agent (BatchMode).
+ * Legacy mode is an `ssh -N -L` forward to a resident agent's loopback port. Managed mode runs the installed agent as
+ * the ssh command with `--stdio` and serves a local port itself, carrying each local connection as a StreamMux channel
+ * over the ssh session's stdin/stdout; the agent exits when that session ends.
  */
 export class SshTunnel implements RemoteEndpoint {
   private child?: ChildProcess;
+  private local?: net.Server;
   private url?: string;
   private opening?: Promise<string>;
   private generation = 0;
@@ -112,12 +129,14 @@ export class SshTunnel implements RemoteEndpoint {
   async close(): Promise<void> {
     this.generation += 1;
     this.url = undefined;
+    this.local?.close();
+    this.local = undefined;
     const child = this.child;
     this.child = undefined;
     if (!child || !running(child)) return;
     const exited = new Promise(resolve => child.once('exit', resolve));
     const grace = this.options.killGraceMs ?? 3000;
-    // Managed: EOF on stdin reaches the remote agent, which removes its socket and exits; ssh then exits by itself.
+    // Managed: EOF on stdin reaches the remote agent, which exits; ssh then exits by itself.
     if (child.stdin) {
       child.stdin.end();
       await Promise.race([exited, delay(Math.min(grace, 1000))]);
@@ -131,15 +150,13 @@ export class SshTunnel implements RemoteEndpoint {
 
   private async start(): Promise<string> {
     const generation = this.generation;
-    const localPort = await freePort();
-    if (generation !== this.generation) throw new Error('SSH tunnel closed');
     const { ssh, remotePort = AGENT_DEFAULT_PORT, managed, sshArgs = [], command = 'ssh', commandArgs = [], timeoutMs = 20_000 } = this.options;
-    const options = ['-T', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
-    let args: string[];
-    if (managed) {
-      const socket = `${managed.home}/.agent-monitor/agent-${randomBytes(8).toString('hex')}.sock`;
-      args = [...options, '-L', `127.0.0.1:${localPort}:${socket}`, ...sshArgs, '--', ssh, managedRemoteCommand(managed, socket)];
-    } else args = ['-N', ...options, '-L', `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`, ...sshArgs, '--', ssh];
+    const localPort = managed ? 0 : await freePort();
+    if (generation !== this.generation) throw new Error('SSH tunnel closed');
+    const args = managed
+      ? [...MANAGED_SSH_OPTIONS, ...sshArgs, '--', ssh, managedRemoteCommand(managed)]
+      : ['-N', '-T', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+        '-L', `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`, ...sshArgs, '--', ssh];
     const child = spawn(command, [...commandArgs, ...args], { stdio: [managed ? 'pipe' : 'ignore', managed ? 'pipe' : 'ignore', 'pipe'], windowsHide: true });
     this.child = child;
     track(child);
@@ -149,7 +166,7 @@ export class SshTunnel implements RemoteEndpoint {
     // ssh may be gone by the time close() ends stdin.
     child.stdin?.on('error', () => {});
     const tail = () => stderr.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-3).join(' | ');
-    child.once('exit', () => { if (this.child === child) { this.child = undefined; this.url = undefined; } });
+    child.once('exit', () => { if (this.child === child) { this.child = undefined; this.url = undefined; this.local = undefined; } });
 
     let settled = false;
     const failed = new Promise<never>((_, reject) => {
@@ -162,37 +179,69 @@ export class SshTunnel implements RemoteEndpoint {
     });
     failed.catch(() => {});
     const timeout = () => new Error(`ssh ${ssh} did not open the tunnel within ${Math.round(timeoutMs / 1000)}s${tail() ? `: ${tail()}` : ''}`);
-    // Managed: the local port accepts before the remote socket exists, so wait for the agent's ready line instead.
-    const ready = managed ? new Promise<void>((resolve, reject) => {
-      let buffer = '';
-      const timer = setTimeout(() => reject(timeout()), timeoutMs);
-      child.stdout!.setEncoding('utf8');
-      child.stdout!.on('data', (chunk: string) => {
-        if (settled) return;
-        buffer = (buffer + chunk).slice(-4096);
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop()!;
-        if (lines.some(line => line.trim() === AGENT_READY_LINE)) { clearTimeout(timer); resolve(); }
-      });
-      child.once('close', () => clearTimeout(timer));
-    }) : (async () => {
+    const ready = managed ? this.serveManaged(child, timeoutMs, timeout) : (async () => {
       const deadline = Date.now() + timeoutMs;
       while (!settled) {
-        if (await accepts(localPort)) return;
+        if (await accepts(localPort)) return localPort;
         if (Date.now() > deadline) throw timeout();
         await delay(100);
       }
+      return localPort;
     })();
     ready.catch(() => {});
+    let port: number;
     try {
-      await Promise.race([ready, failed]);
+      port = await Promise.race([ready, failed]);
       if (generation !== this.generation || !running(child)) throw new Error('SSH tunnel closed');
     } catch (error) {
       if (this.child === child) await this.close();
       else if (running(child)) child.kill('SIGKILL');
       throw error;
     } finally { settled = true; }
-    this.url = `http://127.0.0.1:${localPort}`;
+    this.url = `http://127.0.0.1:${port}`;
     return this.url;
+  }
+
+  /**
+   * Waits for the agent's ready line (login shells may print banners before it), then serves a local loopback port
+   * whose connections become channels over the session. Resolves with that port.
+   */
+  private serveManaged(child: ChildProcess, timeoutMs: number, timeout: () => Error): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      let buffer: Buffer = Buffer.alloc(0);
+      const timer = setTimeout(() => reject(timeout()), timeoutMs);
+      child.once('close', () => clearTimeout(timer));
+      const stdout = child.stdout!;
+      const onData = (chunk: Buffer) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        let start = 0;
+        for (let end = buffer.indexOf(10); end >= 0; start = end + 1, end = buffer.indexOf(10, start)) {
+          if (buffer.subarray(start, end).toString('utf8').trim() !== AGENT_READY_LINE) continue;
+          stdout.off('data', onData);
+          clearTimeout(timer);
+          const mux = new StreamMux(child.stdin!);
+          mux.receive(buffer.subarray(end + 1));
+          stdout.on('data', (data: Buffer) => mux.receive(data));
+          stdout.once('end', () => mux.end());
+          const local = net.createServer(socket => {
+            let channel: Duplex;
+            try { channel = mux.open(); } catch { socket.destroy(); return; }
+            socket.on('error', () => channel.destroy());
+            channel.on('error', () => socket.destroy());
+            socket.pipe(channel).pipe(socket);
+            socket.once('close', () => channel.destroy());
+            channel.once('close', () => socket.destroy());
+          });
+          this.local = local;
+          // A broken session (bad frames or stdout gone) ends the connection; RemoteMonitor reopens it.
+          mux.once('close', () => { local.close(); if (running(child)) child.kill('SIGTERM'); });
+          listenLocal(local).then(resolve, reject);
+          return;
+        }
+        // Keep only an unfinished line, bounded so a chatty login shell cannot grow it.
+        buffer = buffer.subarray(start).subarray(-4096);
+      };
+      stdout.on('data', onData);
+    });
   }
 }

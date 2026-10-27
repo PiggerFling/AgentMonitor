@@ -30,7 +30,7 @@ test('setup picks the newest node >= 22.12, uploads the agent and writes its bar
   assert.equal(await readFile(path.join(dir, 'agent.sha256'), 'utf8'), f.bundle.sha256);
   assert.equal(statSync(dir).mode & 0o777, 0o700);
   const [probe, install] = await f.calls();
-  assert.deepEqual(probe, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new', '-J', 'bastion', '--', 'ok', 'sh -s']);
+  assert.deepEqual(probe, ['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new', '-J', 'bastion', '--', 'ok', 'sh -s']);
   assert.ok(!install.includes('StrictHostKeyChecking=accept-new'));
   assert.match(install.at(-1)!, /^sh -c '/);
   // Reinstalling over an existing copy works and removing deletes the directory.

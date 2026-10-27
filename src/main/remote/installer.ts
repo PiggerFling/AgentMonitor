@@ -45,7 +45,8 @@ const tail = (text: string) => text.split(/\r?\n/).map(line => line.trim()).filt
 function runSsh(options: SshCommandOptions, remoteCommand: string, input: string | Buffer = '', extra: string[] = []): Promise<SshResult> {
   const { ssh, sshArgs = [], acceptNewHostKey, command = 'ssh', commandArgs = [], timeoutMs = 60_000, signal } = options;
   if (signal?.aborted) return Promise.reject(new ServerSetupError('failed', 'cancelled'));
-  const args = [...commandArgs, ...extra, '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', ...(acceptNewHostKey ? ['-o', 'StrictHostKeyChecking=accept-new'] : []), ...sshArgs, '--', ssh, remoteCommand];
+  // Setup needs no forwarding; clearing those from ~/.ssh/config keeps it from taking ports interactive logins use.
+  const args = [...commandArgs, ...extra, '-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=15', ...(acceptNewHostKey ? ['-o', 'StrictHostKeyChecking=accept-new'] : []), ...sshArgs, '--', ssh, remoteCommand];
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '', stderr = '', timedOut = false;
@@ -137,7 +138,7 @@ export async function probeServer(options: SshCommandOptions & { nodeCandidates?
   if (!value('done')) throw new ServerSetupError('failed', `Could not inspect ${options.ssh}; is /bin/sh available?`, { detail: tail(result.stderr) || `exit code ${result.code}` });
   const os = value('os'), home = value('home');
   if (os !== 'Linux' && os !== 'Darwin') throw new ServerSetupError('unsupported-os', `${options.ssh} runs ${os || 'an unknown OS'}; only Linux and macOS servers are supported`, { detail: os });
-  if (!validRemotePath(home) || home.includes(':')) throw new ServerSetupError('failed', `The home directory of ${options.ssh} (${JSON.stringify(home)}) is not supported: it must be an absolute path without quotes, backslashes, colons or control characters`);
+  if (!validRemotePath(home)) throw new ServerSetupError('failed', `The home directory of ${options.ssh} (${JSON.stringify(home)}) is not supported: it must be an absolute path without quotes, backslashes or control characters`);
   const found = lines.filter(([name]) => name === 'node').flatMap(([, text]) => {
     const space = text.indexOf(' '), version = parseVersion(text.slice(0, space)), path = text.slice(space + 1);
     return space > 0 && version && validRemotePath(path) ? [{ path, version, text: text.slice(0, space).replace(/^v/, '') }] : [];

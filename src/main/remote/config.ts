@@ -88,8 +88,8 @@ function validate(entry: unknown, ids: Set<string>): string | undefined {
   if (managed !== undefined && typeof managed !== 'boolean') return '"managed" must be true or false';
   for (const [key, value] of [['home', home], ['nodePath', nodePath]] as const) {
     if (value === undefined) { if (managed) return `"${key}" is required when "managed" is true`; continue; }
-    // Interpolated into the remote shell command (single-quoted) and, for home, into the `-L` socket path where ":" separates fields.
-    if (!validRemotePath(value) || (key === 'home' && value.includes(':'))) return `"${key}" must be an absolute POSIX path without quotes, backslashes${key === 'home' ? ', colons' : ''} or control characters`;
+    // Interpolated into the remote shell command, single-quoted.
+    if (!validRemotePath(value)) return `"${key}" must be an absolute POSIX path without quotes, backslashes or control characters`;
   }
   return undefined;
 }

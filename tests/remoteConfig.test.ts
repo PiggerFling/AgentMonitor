@@ -87,13 +87,13 @@ test('managed entries need absolute, quote-free remote paths', () => {
     { ...ok, id: 'relative', home: 'home/u' },
     { ...ok, id: 'quote', nodePath: "/opt/o'node/bin/node" },
     { ...ok, id: 'ctl', home: '/home/u\n' },
-    { ...ok, id: 'colon', home: '/home/a:b' },
     { ...ok, id: 'type', nodePath: 7 },
     { ...ok, id: 'backslash', nodePath: '/opt/a\\b/node' },
     { ...ok, id: 'spaces', home: '/home/my user', nodePath: '/opt/node 22/bin/node' },
+    { ...ok, id: 'colon', home: '/home/a:b' },
   ] });
-  assert.deepEqual(servers.map(server => server.id), ['spaces']);
-  assert.equal(errors.length, 9);
+  assert.deepEqual(servers.map(server => server.id), ['spaces', 'colon']);
+  assert.equal(errors.length, 8);
   assert.match(errors[0], /\(flag\) skipped: "managed" must be true or false/);
   assert.match(errors[1], /\(nohome\) skipped: "home" is required/);
   assert.match(errors[2], /\(nonode\) skipped: "nodePath" is required/);

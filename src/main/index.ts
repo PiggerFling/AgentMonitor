@@ -3,6 +3,9 @@ import path from 'node:path';
 import { TraceMonitor } from './trace-monitor/TraceMonitor';
 import { HermesMonitor } from './trace-monitor/HermesMonitor';
 import { MultiSourceMonitor } from './trace-monitor/MultiSourceMonitor';
+import { RemoteMonitor } from './trace-monitor/RemoteMonitor';
+import { ConfigErrorSource, loadServersConfig } from './remote/config';
+import { SshTunnel } from './remote/sshTunnel';
 
 let window: BrowserWindow | null = null;
 const idle = Number(process.env.AGENT_MONITOR_IDLE_MS);
@@ -10,9 +13,12 @@ const fileMonitor = new TraceMonitor({
   ...(process.env.AGENT_MONITOR_TRACE_ROOT ? {roots: [path.resolve(process.env.AGENT_MONITOR_TRACE_ROOT)]} : {}),
   ...(Number.isFinite(idle) && idle > 0 ? {idleMs: idle} : {}),
 });
+const remotes = loadServersConfig(app.getPath('userData'));
 const monitor = new MultiSourceMonitor([
   ...(process.env.AGENT_MONITOR_TRACE_ROOT ? [] : [new HermesMonitor(Number.isFinite(idle) && idle > 0 ? {idleMs:idle} : {})]),
   fileMonitor,
+  ...remotes.servers.map(server => new RemoteMonitor({ id: server.id, label: server.label, endpoint: new SshTunnel(server) })),
+  ...(remotes.errors.length ? [new ConfigErrorSource(remotes.errors)] : []),
 ]);
 const developmentUrl = process.env.VITE_DEV_SERVER_URL;
 // Packaged apps ship the icon as an extra resource; development reads it from build/ (icon.icns and icon.ico sit beside it).

@@ -53,6 +53,7 @@ import type {
   AgentRun,
   MonitorBridge,
   MonitorSnapshot,
+  RemoteHostStatus,
   TraceEntry,
 } from '../shared/types';
 import { useDashboardStore } from './store';
@@ -61,6 +62,7 @@ import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
+import { assessMonitorHealth, buildHostOptions, filterAgentsByHost, filterRunsByHost, remoteIndicatorState, remoteStatusTitle, resolveHostFilter, runHostLabel } from './remoteUi';
 import './TraceTabs.css';
 
 type SourceMode = 'loading' | 'live' | 'offline' | 'demo';
@@ -878,7 +880,25 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   );
 }
 
-function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
+function RemoteStatusList({ remotes, remoteErrors }: { remotes: RemoteHostStatus[]; remoteErrors: Record<string, string[]> }) {
+  const connected = remotes.filter((remote) => remote.state === 'connected').length;
+  return <div className="remote-status">
+    <div className="remote-status__head"><span>Remote hosts</span><span className="remote-status__count">{connected}/{remotes.length} connected</span></div>
+    <ul className="remote-status__list">
+      {remotes.map((remote) => {
+        const errors = remoteErrors[remote.id] ?? [];
+        const state = remoteIndicatorState(remote, errors);
+        const title = remoteStatusTitle(remote, errors) + (remote.state !== 'connected' && remote.lastConnectedAt ? `\nLast connected ${formatRelative(remote.lastConnectedAt)}` : '');
+        return <li key={remote.id} className={`remote-status__item remote-status__item--${state}`} title={title} aria-label={title}>
+          <span className="remote-status__dot" aria-hidden="true" /><span className="remote-status__label">{remote.label}</span>
+        </li>;
+      })}
+    </ul>
+  </div>;
+}
+
+function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId, remotes, remoteErrors }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string; remotes: RemoteHostStatus[]; remoteErrors: Record<string, string[]> }) {
+  const remotesConfigured = remotes.length > 0;
   const watcherTitle = usingDemo ? 'Demo stream' : watching ? 'Trace watcher' : 'Watcher paused';
   const watcherSubtitle = usingDemo ? 'sample data loaded' : errors.length ? `${errors.length} monitor issue${errors.length === 1 ? '' : 's'}` : watching ? 'listening locally' : 'monitor connected';
   return (
@@ -893,6 +913,7 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
             const loading = run.id === loadingRunId;
             const summary = runTokenSummaries[run.id];
             const loaded = run.id === loadedRunId && !loadingRunId;
+            const hostLabel = runHostLabel(run, remotesConfigured);
             const tokenTotal = (summary?.input ?? 0) + (summary?.output ?? 0);
             const stale = Boolean(summary && !loaded && run.lastActivityAt && summary.lastActivityAt && run.lastActivityAt > summary.lastActivityAt);
             const tokenTitle = loaded
@@ -904,7 +925,7 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
                 : 'Load this run to see input plus output tokens.';
             return <button key={run.id} type="button" className={`run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`} onClick={() => onSelectRun(run.id)} aria-busy={loading}>
               <span className="run-item__body">
-                <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{runAgentCount(run, agents)} agents</span></span>
+                <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{runAgentCount(run, agents)} agents</span>{hostLabel && <span className={`host-tag ${run.host ? 'host-tag--remote' : ''}`} title={run.host ? `Remote host: ${run.host}` : 'This machine'}>{hostLabel}</span>}</span>
                 <span className="run-item__path" title={run.cwd || run.title || 'Current workspace'}>{run.title || run.cwd?.split('/').filter(Boolean).pop() || 'Current workspace'}</span>
                 <span className="run-item__meta">
                   <span className="run-item__time">{loading ? 'loading agents…' : formatRelative(run.lastActivityAt ?? run.startedAt)}</span>
@@ -919,7 +940,7 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
         </div>
         {!runs.length && <div className="sidebar__empty">No runs discovered yet.</div>}
       </div>
-      <div className="sidebar__bottom"><div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title="Load demo stream" onClick={onDemo}>Demo</button></div><div className="sidebar__tip"><span>Click an agent to inspect its normalized trace.</span></div></div>
+      <div className="sidebar__bottom">{remotesConfigured && !usingDemo && <RemoteStatusList remotes={remotes} remoteErrors={remoteErrors} />}<div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title="Load demo stream" onClick={onDemo}>Demo</button></div><div className="sidebar__tip"><span>Click an agent to inspect its normalized trace.</span></div></div>
     </aside>
   );
 }
@@ -940,11 +961,15 @@ function App() {
     if (activeTraceId === id) setActiveTraceId(null);
   };
   const { snapshot: sourceSnapshot, mode, setDemo, setLive, usingDemo, loadedRunId, loadingRunId, runLoadError, loadRun } = useMonitorSnapshot();
-  const { providerFilter, selectedRunId, selectedAgentId, setProviderFilter, selectRun, selectAgent } = useDashboardStore();
+  const { providerFilter, hostFilter, selectedRunId, selectedAgentId, setProviderFilter, setHostFilter, resetHostFilter, selectRun, selectAgent } = useDashboardStore();
+  const remotes = useMemo(() => sourceSnapshot.remotes ?? [], [sourceSnapshot.remotes]);
+  const remotesConfigured = remotes.length > 0;
+  const hostOptions = useMemo(() => buildHostOptions(remotes), [remotes]);
+  const effectiveHostFilter = resolveHostFilter(hostFilter, remotes);
 
-  const runs = useMemo(() => [...sourceSnapshot.runs].filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
+  const runs = useMemo(() => filterRunsByHost(sourceSnapshot.runs.filter((run) => providerFilter === 'all' || run.harness === providerFilter), effectiveHostFilter).sort(runSort), [effectiveHostFilter, providerFilter, sourceSnapshot.runs]);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
-  const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
+  const agents = useMemo(() => filterAgentsByHost(sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), sourceSnapshot.runs, effectiveHostFilter), [effectiveHostFilter, providerFilter, sourceSnapshot.agents, sourceSnapshot.runs]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const expandedAgent = activeTraceId ? agents.find(agent => agent.id === activeTraceId) ?? traceTabs.find(agent => agent.id === activeTraceId) : undefined;
 
@@ -983,6 +1008,11 @@ function App() {
   }, [loadedRunAgents, loadedRunId, loadedRunMetadata, loadingRunId]);
 
   useEffect(() => {
+    // A host removed from the config should not leave a dangling filter behind if it comes back later.
+    if (mode === 'live' && hostFilter !== effectiveHostFilter) resetHostFilter();
+  }, [effectiveHostFilter, hostFilter, mode, resetHostFilter]);
+
+  useEffect(() => {
     if (selectedRunId && !runs.some((run) => run.id === selectedRunId)) {
       selectRun(undefined);
       selectAgent(null);
@@ -1000,7 +1030,10 @@ function App() {
   const hasGraph = Boolean(runIsLoaded && runAgents.length);
   const showRunTokens = hasGraph && loadingRunId !== selectedRun?.id;
   const watcherLive = mode === 'live' && sourceSnapshot.watching;
-  const monitorHasErrors = mode !== 'demo' && sourceSnapshot.errors.length > 0;
+  const health = useMemo(() => assessMonitorHealth({ errors: sourceSnapshot.errors, remotes, watching: sourceSnapshot.watching }), [remotes, sourceSnapshot.errors, sourceSnapshot.watching]);
+  const monitorErrors = health.visibleErrors;
+  const monitorHasErrors = mode !== 'demo' && health.warning;
+  const liveBadgeTitle = remotesConfigured && mode !== 'demo' ? `${health.connectedRemotes} of ${health.totalRemotes} remote host${health.totalRemotes === 1 ? '' : 's'} connected` : undefined;
   const isWatching = watcherLive || mode === 'demo';
   const statusLabel = mode === 'demo'
     ? 'DEMO MODE'
@@ -1038,9 +1071,9 @@ function App() {
 
   return (
     <div className="app-shell">
-      {!expandedAgent && <Sidebar runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={sourceSnapshot.errors} loadingRunId={loadingRunId} />}
+      {!expandedAgent && <Sidebar runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={health.localErrors} loadingRunId={loadingRunId} remotes={remotes} remoteErrors={health.remoteErrors} />}
       <main className="workspace">
-        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">Workspace</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || 'Agent activity'}</span></div><div className="topbar__controls"><ThemeSelector /><Dropdown label="Provider" value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label="Run" value={selectedRun?.id ?? ''} placeholder="Select a run" wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || 'workspace', description: `${providerLabel(run.harness)} · ${runAgentCount(run, agents)} agents · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>Return to live</button>}</div></header>
+        <header className={`topbar ${hostOptions.length > 0 ? 'topbar--with-host' : ''}`}><div className="topbar__context"><span className="topbar__section-label">Workspace</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || 'Agent activity'}</span></div><div className="topbar__controls"><ThemeSelector /><Dropdown label="Provider" value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }))} onChange={value => setProviderFilter(value as ProviderFilter)} />{hostOptions.length > 0 && <Dropdown label="Host" value={effectiveHostFilter} options={hostOptions} onChange={setHostFilter} />}<Dropdown label="Run" value={selectedRun?.id ?? ''} placeholder="Select a run" wide options={runs.map(run => { const host = runHostLabel(run, remotesConfigured); return { value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || 'workspace', description: `${host ? `${host} · ` : ''}${providerLabel(run.harness)} · ${runAgentCount(run, agents)} agents · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }; })} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`} title={liveBadgeTitle}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>Return to live</button>}</div></header>
         {traceTabs.length > 0 && <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
@@ -1057,8 +1090,8 @@ function App() {
           </div>)}
         </div>}
         <div id="graph-panel" className="workspace-graph-view" style={expandedAgent ? { display: 'none' } : undefined}>
-        <div className="workspace__subbar"><div><h1>Agent topology</h1><p>{selectedRun && runIsLoaded ? `${runAgents.length} agents · ${runEdges.length} spawn relationships` : selectedRun ? 'Select run loading in progress' : 'Select a run to load its agents'}</p></div><div className="workspace__subbar-center">{showRunTokens && <RunTokenDetails key={selectedRun?.id} agents={runAgents} />}</div><div className="workspace__subbar-right"><span className="refresh-label"><RefreshCw size={12} className={isWatching ? 'refresh-label__spin' : ''} />{monitorHasErrors ? `${sourceSnapshot.errors.length} monitor issue${sourceSnapshot.errors.length === 1 ? '' : 's'}` : loadingRunId ? 'Loading selected run' : isWatching ? `Updated ${formatRelative(selectedRun?.lastActivityAt)}` : mode === 'live' ? 'Watcher paused' : 'Waiting for monitor'}</span><button type="button" className="icon-button icon-button--search" title="Search agents"><Search size={16} /></button></div></div>
-        {monitorHasErrors && <div className="monitor-error-strip" role="status"><TriangleAlert size={14} /><span><strong>Monitor issue{sourceSnapshot.errors.length === 1 ? '' : 's'}:</strong> {sourceSnapshot.errors[0]}</span>{sourceSnapshot.errors.length > 1 && <span className="monitor-error-strip__count">+{sourceSnapshot.errors.length - 1} more</span>}</div>}
+        <div className="workspace__subbar"><div><h1>Agent topology</h1><p>{selectedRun && runIsLoaded ? `${runAgents.length} agents · ${runEdges.length} spawn relationships` : selectedRun ? 'Select run loading in progress' : 'Select a run to load its agents'}</p></div><div className="workspace__subbar-center">{showRunTokens && <RunTokenDetails key={selectedRun?.id} agents={runAgents} />}</div><div className="workspace__subbar-right"><span className="refresh-label"><RefreshCw size={12} className={isWatching ? 'refresh-label__spin' : ''} />{monitorHasErrors ? `${monitorErrors.length} monitor issue${monitorErrors.length === 1 ? '' : 's'}` : loadingRunId ? 'Loading selected run' : isWatching ? `Updated ${formatRelative(selectedRun?.lastActivityAt)}` : mode === 'live' ? 'Watcher paused' : 'Waiting for monitor'}</span><button type="button" className="icon-button icon-button--search" title="Search agents"><Search size={16} /></button></div></div>
+        {monitorHasErrors && monitorErrors.length > 0 && <div className="monitor-error-strip" role="status"><TriangleAlert size={14} /><span><strong>Monitor issue{monitorErrors.length === 1 ? '' : 's'}:</strong> {monitorErrors[0]}</span>{monitorErrors.length > 1 && <span className="monitor-error-strip__count">+{monitorErrors.length - 1} more</span>}</div>}
         <div className="workspace__body">
           <section className={`canvas-panel ${selectedAgent ? 'canvas-panel--with-details' : ''}`}>
             {hasGraph ? <AgentGraph runId={selectedRun?.id} agents={runAgents} edges={runEdges} selectedAgentId={selectedAgentId} onSelectAgent={selectAgent} onOpenTrace={openTrace} /> : <EmptyGraph mode={mode} selectedRun={selectedRun} loading={Boolean(loadingRunId && loadingRunId === selectedRun?.id)} loadError={selectedRun?.id === selectedRunId ? runLoadError : undefined} onDemo={handleDemo} onRetry={selectedRun ? () => handleRunSelect(selectedRun.id) : undefined} />}

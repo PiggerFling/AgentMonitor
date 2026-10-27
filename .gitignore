@@ -2,6 +2,7 @@
 node_modules/
 dist/
 dist-electron/
+dist-agent/
 release/
 coverage/
 *.tsbuildinfo

@@ -38,6 +38,7 @@ export class MultiSourceMonitor extends EventEmitter {
     const selected = this.selectedSource?.snapshot();
     const agents = selected?.agents.filter(agent => agent.runId === this.selectedRunId) ?? [];
     const ids = new Set(agents.map(agent => agent.id));
+    const remotes = snapshots.flatMap(snapshot => snapshot.remotes ?? []);
     return {
       runs: [...new Map(snapshots.flatMap(snapshot => snapshot.runs).reverse().map(run => [run.id,run])).values()].sort((a, b) => (b.lastActivityAt ?? b.startedAt ?? 0) - (a.lastActivityAt ?? a.startedAt ?? 0)),
       agents,
@@ -45,6 +46,7 @@ export class MultiSourceMonitor extends EventEmitter {
       errors: snapshots.flatMap(snapshot => snapshot.errors),
       watching: snapshots.some(snapshot => snapshot.watching),
       ...(this.selectedRunId ? { selectedRunId: this.selectedRunId } : {}),
+      ...(remotes.length ? { remotes } : {}),
     };
   }
 

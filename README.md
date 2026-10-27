@@ -30,6 +30,10 @@ Default sources:
 | Pi | `$PI_CODING_AGENT_DIR/sessions` or `~/.pi/agent/sessions` |
 | Hermes | `$HERMES_HOME/state.db`, `session-exports/traces`, and `sessions`, defaulting to `~/.hermes` |
 
+## Remote servers
+
+Monitor agents on other machines too: run the headless agent on each server (`npm run agent`, or copy the single file `dist-agent/agent.cjs`) and list the servers in `servers.json`. The app connects through SSH port forwards using your existing `~/.ssh/config` and keys; the agent listens on loopback only. See [Remote servers](docs/remote.md).
+
 ## Trace view
 
 Open any agent in a tab to read its conversation, tool calls, and results, with links to its parent and subagents.
@@ -52,6 +56,7 @@ Switch to **By model** to see tokens and cost grouped by model.
 
 - [Using the dashboard](docs/usage.md)
 - [Discovery, configuration, and privacy](docs/discovery-and-privacy.md)
+- [Remote servers](docs/remote.md)
 - [Development and production builds](docs/development.md)
 - [Pricing sources and assumptions](docs/token-pricing.md)
 - [Product specification](SPEC.md)

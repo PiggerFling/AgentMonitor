@@ -24,9 +24,12 @@ export interface Agent {
   tokenTimeline?: { timestamp: number; inputTokens: number; outputTokens: number }[];
   stats: { inputTokens: number; outputTokens: number; toolCalls: number; errors: number };
 }
-export interface AgentRun { title?: string; id: string; harness: AgentHarness; rootAgentId?: string; cwd?: string; startedAt?: number; lastActivityAt?: number; agentCount?: number }
+/** `host` is set on runs from a remote agent-monitor agent and names the server they came from. */
+export interface AgentRun { title?: string; id: string; harness: AgentHarness; host?: string; rootAgentId?: string; cwd?: string; startedAt?: number; lastActivityAt?: number; agentCount?: number }
 export interface AgentEdge { id: string; source: string; target: string; type: 'spawn'; status: 'starting' | 'active' | 'finished' }
-export interface MonitorSnapshot { agents: Agent[]; runs: AgentRun[]; edges: AgentEdge[]; watching: boolean; errors: string[]; selectedRunId?: string }
+/** Connection state of one configured remote server, as reported by its RemoteMonitor. */
+export interface RemoteHostStatus { id: string; label: string; state: 'connecting' | 'connected' | 'error'; error?: string; lastConnectedAt?: number }
+export interface MonitorSnapshot { agents: Agent[]; runs: AgentRun[]; edges: AgentEdge[]; watching: boolean; errors: string[]; selectedRunId?: string; remotes?: RemoteHostStatus[] }
 /** `usage` holds the token counts of the single request a usage entry reports. */
 export interface TraceEntry { usage?: { input: number; output: number }; callId?: string; toolName?: string; model?: string; reasoningEffort?: string; turnId?: string; id: string; timestamp?: number; kind: 'user' | 'assistant' | 'thinking' | 'tool-call' | 'tool-result' | 'usage' | 'error' | 'event'; text: string }
 export type AgentEvent = { type: 'agent.discovered'; agent: Agent } | { type: 'agent.spawned'; agent: Agent } | {type:'agent.updated';agentId:string;changes:Partial<Agent>} | {type:'agent.finished';agentId:string} | {type:'agent.error';agentId:string;error?:string} | {type:'agent.activity';agentId:string;timestamp:number} | {type:'run.discovered';run:AgentRun};

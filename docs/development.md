@@ -33,7 +33,7 @@ npm run build
 npm start
 ```
 
-`npm run dev:web` provides a browser-only demo; local trace discovery requires Electron.
+`npm run dev:web` serves the interface in a browser without data (it shows an offline empty state); trace discovery and settings require Electron.
 
 ## Packaging and releases
 

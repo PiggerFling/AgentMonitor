@@ -20,21 +20,10 @@ permissions:
 
 jobs:
   build:
-    name: Build (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS
-            os: macos-latest
-            args: --mac
-          - name: Windows
-            os: windows-latest
-            args: --win
-          - name: Linux
-            os: ubuntu-latest
-            args: --linux
-    runs-on: ${{ matrix.os }}
+    # Apple Silicon only. The other targets in electron-builder.yml are still
+    # available locally through npm run dist.
+    name: Build (macOS arm64)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,55 +37,21 @@ jobs:
       - run: npm ci
 
       - name: Package
-        run: npm run build && npx electron-builder ${{ matrix.args }} --publish never
+        run: npm run build && npx electron-builder --mac dmg:arm64 zip:arm64 --publish never
 
       # One artifact per installer, uploaded unzipped and named after the file,
       # so each can be downloaded on its own. archive: false takes a single file.
-      - name: Upload macOS arm64 dmg
-        if: runner.os == 'macOS'
+      - name: Upload dmg
         uses: actions/upload-artifact@v7
         with:
           path: release/*-mac-arm64.dmg
           archive: false
           if-no-files-found: error
 
-      - name: Upload macOS x64 dmg
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v7
-        with:
-          path: release/*-mac-x64.dmg
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload macOS arm64 zip
-        if: runner.os == 'macOS'
+      - name: Upload zip
         uses: actions/upload-artifact@v7
         with:
           path: release/*-mac-arm64.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload macOS x64 zip
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v7
-        with:
-          path: release/*-mac-x64.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload Windows installer
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          path: release/*.exe
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload Linux AppImage
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v7
-        with:
-          path: release/*.AppImage
           archive: false
           if-no-files-found: error
 

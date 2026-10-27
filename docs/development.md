@@ -39,4 +39,4 @@ npm start
 
 `npm run dist` packages installers for the current platform into `release/` using `electron-builder.yml` (macOS `.dmg`/`.zip`, Windows NSIS `.exe`, Linux `.AppImage`). Builds are unsigned; macOS builds are ad-hoc signed so Apple Silicon can open them.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which packages on macOS, Windows, and Linux runners and publishes a GitHub release with `.github/release-notes.md`. Bump `version` in `package.json` before tagging.
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which packages the Apple Silicon (arm64) `.dmg` and `.zip` on a macOS runner and publishes a GitHub release with `.github/release-notes.md`. Bump `version` in `package.json` before tagging.

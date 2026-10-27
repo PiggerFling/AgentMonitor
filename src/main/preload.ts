@@ -12,7 +12,12 @@ const bridge: MonitorBridge = {
   loadRun: runId => ipcRenderer.invoke('monitor:load-run', runId),
   onSnapshot: callback => subscribe<MonitorSnapshot>('monitor:changed', callback),
   listSshHosts: () => ipcRenderer.invoke('servers:list-ssh-hosts'),
+  listServers: () => ipcRenderer.invoke('servers:list'),
+  probeServer: request => ipcRenderer.invoke('servers:probe', request),
   addServer: request => ipcRenderer.invoke('servers:add', request),
+  updateServer: request => ipcRenderer.invoke('servers:update', request),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: settings => ipcRenderer.invoke('settings:update', settings),
   removeServer: request => ipcRenderer.invoke('servers:remove', request),
   onServerSetupProgress: callback => subscribe<ServerSetupProgress>('servers:progress', callback),
 };

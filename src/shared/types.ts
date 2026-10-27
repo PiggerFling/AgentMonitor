@@ -49,11 +49,45 @@ export type ServerSetupErrorCode = 'auth' | 'host-key' | 'host-key-changed' | 'u
 export type AddServerResult = { ok: true; serverId: string } | { ok: false; code: ServerSetupErrorCode; message: string; detail?: string; nodeVersion?: string; fingerprint?: string };
 /** `cleanupError` is set when removing ~/.agent-monitor on the server failed; the entry is removed regardless. */
 export type RemoveServerResult = { ok: true; cleanupError?: string } | { ok: false; code: 'not-found' | 'failed'; message: string };
+/** Tools whose traces a machine can serve. */
+export type TraceTool = 'claude' | 'codex' | 'pi' | 'hermes';
+export const TRACE_TOOLS: readonly TraceTool[] = ['claude', 'codex', 'pi', 'hermes'];
+/**
+ * Absolute data directory of each tool, i.e. the value of its own variable: CLAUDE_CONFIG_DIR (~/.claude), CODEX_HOME
+ * (~/.codex), PI_CODING_AGENT_DIR (~/.pi/agent), HERMES_HOME (~/.hermes). A missing entry means the tool's default.
+ */
+export type TraceDirs = Partial<Record<TraceTool, string>>;
+/** Which tools a machine watches and where their data lives. `tools` missing means all of them. */
+export interface TraceSourceOptions { tools?: TraceTool[]; traceDirs?: TraceDirs }
+/** A servers.json entry as the settings UI sees it. */
+export interface ServerInfo extends TraceSourceOptions { id: string; label: string; ssh: string; managed: boolean; sshArgs: string[] }
+/**
+ * What adding a server would use, found over ssh without installing anything. `detected` holds data directories read
+ * from the login shell's environment (e.g. CODEX_HOME set in ~/.zshrc) and `present` the tools whose directory exists.
+ */
+export type ProbeServerResult =
+  | { ok: true; home: string; os: string; arch: string; nodePath: string; nodeVersion: string; detected: TraceDirs; present: TraceTool[] }
+  | Extract<AddServerResult, { ok: false }>;
+export interface AddServerRequest extends TraceSourceOptions { alias: string; label?: string; sshArgs?: string[]; acceptNewHostKey?: boolean }
+export interface UpdateServerRequest extends TraceSourceOptions { id: string; label?: string; sshArgs?: string[] }
+/** `invalid`: a field failed validation (see `message`). Saving reconnects the server with the new options. */
+export type UpdateServerResult = { ok: true } | { ok: false; code: 'not-found' | 'invalid' | 'failed'; message: string };
+/** Desktop settings stored in the app's data directory; `local` applies to this machine's own traces. */
+export interface AppSettings { local: TraceSourceOptions }
+export type UpdateSettingsResult = { ok: true; settings: AppSettings } | { ok: false; message: string };
 export interface MonitorBridge {
   platform?: string; getSnapshot(): Promise<MonitorSnapshot>; onSnapshot(callback: (snapshot: MonitorSnapshot) => void): () => void; getTrace(agentId: string): Promise<TraceEntry[]>; loadRun(runId: string): Promise<void>;
   listSshHosts(): Promise<SshHostInfo[]>;
+  /** Configured servers (managed and manual) in servers.json order. */
+  listServers(): Promise<ServerInfo[]>;
+  /** Inspects a host over ssh to prefill the add-server form; installs nothing. */
+  probeServer(request: { alias: string; sshArgs?: string[]; acceptNewHostKey?: boolean }): Promise<ProbeServerResult>;
   /** Probes the host, installs the agent and saves the server; it starts connecting right away. Progress arrives through onServerSetupProgress. */
-  addServer(request: { alias: string; acceptNewHostKey?: boolean }): Promise<AddServerResult>;
+  addServer(request: AddServerRequest): Promise<AddServerResult>;
+  updateServer(request: UpdateServerRequest): Promise<UpdateServerResult>;
+  getSettings(): Promise<AppSettings>;
+  /** Replaces the settings and restarts the local watchers with them. */
+  updateSettings(settings: AppSettings): Promise<UpdateSettingsResult>;
   /** Stops and forgets a server; `cleanup` also deletes ~/.agent-monitor on it (managed servers only, best effort). */
   removeServer(request: { id: string; cleanup: boolean }): Promise<RemoveServerResult>;
   onServerSetupProgress(callback: (progress: ServerSetupProgress) => void): () => void;
